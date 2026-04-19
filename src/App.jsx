@@ -1,725 +1,780 @@
 import { useState, useEffect } from "react";
 
-// ─── constants ────────────────────────────────────────────────────────────
-const MR = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
-const MG = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
-const DW = ["Вс","Пн","Вт","Ср","Чт","Пт","Сб"];
-const dim = (y,m) => new Date(y,m+1,0).getDate();
-const fz  = n => Number(n||0).toFixed(2);
-const fi  = n => Math.round(Number(n||0));
-const pct = (a,b) => b>0 ? Math.min(Math.round((a/b)*100),999) : 0;
-const p2  = n => String(n).padStart(2,"0");
-const ds  = (y,m,d) => `${y}-${p2(m+1)}-${p2(d)}`;
+// ── utils ────────────────────────────────────────────────────────
+const fz = n => Number(n || 0).toFixed(2);
+const pct = (a, b) => b > 0 ? Math.min(Math.round((a / b) * 100), 100) : 0;
+const dim = (y, m) => new Date(y, m + 1, 0).getDate();
+const p2 = n => String(n).padStart(2, "0");
+const dateStr = (y, m, d) => `${y}-${p2(m + 1)}-${p2(d)}`;
 
-const EXP_CATS = [
-  {id:"food",   label:"Еда",          icon:"🍲", color:"#4ade80"},
-  {id:"fuel",   label:"Топливо",      icon:"⛽", color:"#fbbf24"},
-  {id:"smokes", label:"Сигареты",     icon:"🚬", color:"#94a3b8"},
-  {id:"transport",label:"Транспорт",  icon:"🚌", color:"#60a5fa"},
-  {id:"health", label:"Здоровье",     icon:"💊", color:"#f472b6"},
-  {id:"other",  label:"Прочее",       icon:"📦", color:"#a78bfa"},
-];
+const MRU = ["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+const MGE = ["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+const DOW = ["Вс","Пн","Вт","Ср","Чт","Пт","Сб"];
 
-const DEFAULT_BILLS = [
-  {id:"rent",    label:"Аренда квартиры", icon:"🏠", day:1,  amount:"", color:"#818cf8"},
-  {id:"scooter", label:"Аренда скутера",  icon:"🛵", day:1,  amount:"", color:"#fb923c"},
-  {id:"phone",   label:"Телефон",         icon:"📱", day:15, amount:"", color:"#38bdf8"},
-  {id:"internet",label:"Интернет",        icon:"🌐", day:10, amount:"", color:"#34d399"},
-  {id:"other",   label:"Другой платёж",   icon:"💳", day:1,  amount:"", color:"#f472b6"},
-];
-
+// ── storage ──────────────────────────────────────────────────────
 const LS = {
-  get:(k,d)=>{try{const r=localStorage.getItem(k);return r?JSON.parse(r):d;}catch{return d;}},
-  set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}},
+  get: (k, d) => { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : d; } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
-const KB = "fb2_bills";
-const KG = (y,m) => `fb2_goals_${y}`;
-const KD = (y,m) => `fb2_days_${y}_${m}`;  // {[dateStr]: {wolt,bolt,expenses:[{cat,amount,label}],note,mood}}
-const KP = (y,m) => `fb2_paid_${y}_${m}`;  // {[billId]: amount}
 
-// ─── main ─────────────────────────────────────────────────────────────────
+const KEY_BILLS = "kpl_bills_v1";
+const KEY_LOG   = (y, m) => `kpl_log_${y}_${m}`;
+const KEY_GOALS = "kpl_goals_v1";
+
+// ── default bills ────────────────────────────────────────────────
+const DEFAULT_BILLS = [
+  { id: "rent",    label: "Аренда квартиры", icon: "🏠", freq: "monthly", day: 1,  dow: 4, amount: "" },
+  { id: "scooter", label: "Аренда скутера",  icon: "🛵", freq: "weekly",  day: 1,  dow: 4, amount: "" },
+  { id: "phone",   label: "Телефон",         icon: "📱", freq: "monthly", day: 15, dow: 4, amount: "" },
+  { id: "food",    label: "Еда",             icon: "🍲", freq: "monthly", day: 1,  dow: 4, amount: "" },
+  { id: "smokes",  label: "Сигареты",        icon: "🚬", freq: "monthly", day: 1,  dow: 4, amount: "" },
+  { id: "fuel",    label: "Топливо",         icon: "⛽", freq: "monthly", day: 1,  dow: 4, amount: "" },
+];
+
+// how many times weekly bill fires in a month
+const weeklyCount = (dow, y, m) => {
+  let n = 0;
+  for (let d = 1; d <= dim(y, m); d++) if (new Date(y, m, d).getDay() === dow) n++;
+  return n;
+};
+
+// monthly cost of a bill
+const billMonthlyCost = (b, y, m) => {
+  const amt = parseFloat(b.amount) || 0;
+  if (b.freq === "weekly") return amt * weeklyCount(b.dow, y, m);
+  return amt;
+};
+
+// ── expense categories ───────────────────────────────────────────
+const EXP_CATS = [
+  { id: "food",      label: "Еда",        icon: "🍲" },
+  { id: "fuel",      label: "Топливо",    icon: "⛽" },
+  { id: "smokes",    label: "Сигареты",   icon: "🚬" },
+  { id: "transport", label: "Транспорт",  icon: "🚌" },
+  { id: "health",    label: "Здоровье",   icon: "💊" },
+  { id: "other",     label: "Прочее",     icon: "📦" },
+];
+
+// ── main app ─────────────────────────────────────────────────────
 export default function App() {
-  const [,tick] = useState(0);
-  useEffect(()=>{const t=setInterval(()=>tick(x=>x+1),30000);return()=>clearInterval(t);},[]);
+  const now = new Date();
+  const CY = now.getFullYear(), CM = now.getMonth(), CD = now.getDate();
+  const HH = p2(now.getHours()), MM = p2(now.getMinutes());
 
-  const NOW = new Date();
-  const CY = NOW.getFullYear(), CM = NOW.getMonth(), CD = NOW.getDate();
-  const HH = p2(NOW.getHours()), MM = p2(NOW.getMinutes());
-
-  const [tab,  setTab]  = useState("today");
+  const [tab, setTab] = useState("today");
   const [year, setYear] = useState(CY);
-  const [mon,  setMon]  = useState(CM);
+  const [month, setMonth] = useState(CM);
 
-  const [bills, setBills] = useState(()=>LS.get(KB, DEFAULT_BILLS));
-  const [goals, setGoals] = useState(()=>LS.get(KG(CY), []));
-  const [dayData, setDayData] = useState(()=>LS.get(KD(CY,CM), {}));
-  const [paid, setPaid] = useState(()=>LS.get(KP(CY,CM), {}));
+  const [bills, setBills]   = useState(() => LS.get(KEY_BILLS, DEFAULT_BILLS));
+  const [log, setLog]       = useState(() => LS.get(KEY_LOG(CY, CM), {}));
+  const [goals, setGoals]   = useState(() => LS.get(KEY_GOALS, []));
 
-  // selected day for edit
-  const [editDay, setEditDay] = useState(null);
-  const [eWolt,setEWolt]=useState(""); const [eBolt,setEBolt]=useState("");
-  const [eNote,setENote]=useState(""); const [eMood,setEMood]=useState("✅");
-  const [eExpCat,setEExpCat]=useState("food"); const [eExpAmt,setEExpAmt]=useState("");
-  const [eExpLbl,setEExpLbl]=useState("");
+  // reload log when month changes
+  useEffect(() => { setLog(LS.get(KEY_LOG(year, month), {})); }, [year, month]);
 
-  // reload when month changes
-  useEffect(()=>{
-    setDayData(LS.get(KD(year,mon),{}));
-    setPaid(LS.get(KP(year,mon),{}));
-  },[year,mon]);
+  // ── add income modal ────────────────────────────────────────────
+  const [showAddIncome, setShowAddIncome] = useState(false);
+  const [incWolt, setIncWolt] = useState("");
+  const [incBolt, setIncBolt] = useState("");
+  const [incNote, setIncNote] = useState("");
 
-  // ── helpers ───────────────────────────────────────────────────────────────
-  const totalDays = dim(year,mon);
-  const totalBills = bills.reduce((s,b)=>s+(parseFloat(b.amount)||0),0);
-  const dailyTarget = totalBills>0 ? totalBills/totalDays : 0;
+  // ── add expense modal ────────────────────────────────────────────
+  const [showAddExp, setShowAddExp] = useState(false);
+  const [expCat, setExpCat] = useState("food");
+  const [expAmt, setExpAmt] = useState("");
+  const [expLabel, setExpLabel] = useState("");
 
-  // aggregate month
-  let mWolt=0,mBolt=0,mVarExp=0;
-  const moodCount={};
-  for(let d=1;d<=totalDays;d++){
-    const dk=ds(year,mon,d);
-    const dd=dayData[dk]||{};
-    mWolt+=parseFloat(dd.wolt)||0;
-    mBolt+=parseFloat(dd.bolt)||0;
-    (dd.expenses||[]).forEach(e=>mVarExp+=parseFloat(e.amount)||0);
-    if(dd.mood) moodCount[dd.mood]=(moodCount[dd.mood]||0)+1;
-  }
-  const mInc=mWolt+mBolt;
+  // ── day detail modal ─────────────────────────────────────────────
+  const [dayModal, setDayModal] = useState(null); // date string or null
 
-  // T+1: received = all days before today (same month) + previous months handled separately
-  const isCurMon = year===CY && mon===CM;
-  const todayStr = ds(CY,CM,CD);
-  const yDay = new Date(CY,CM,CD-1);
-  const yStr = ds(yDay.getFullYear(),yDay.getMonth(),yDay.getDate());
+  // ── bill edit state ──────────────────────────────────────────────
+  const [editBillId, setEditBillId] = useState(null);
 
-  let onHand=0;
-  for(let d=1;d<=totalDays;d++){
-    const dk=ds(year,mon,d);
-    const dd=dayData[dk]||{};
-    const inc=(parseFloat(dd.wolt)||0)+(parseFloat(dd.bolt)||0);
-    if(!isCurMon || dk<todayStr) onHand+=inc;
-  }
+  const isCurrent = year === CY && month === CM;
+  const todayKey  = dateStr(CY, CM, CD);
+  const totalDays = dim(year, month);
 
-  const mPaid = Object.values(paid).reduce((s,v)=>s+(parseFloat(v)||0),0);
-  const netMonth = onHand - totalBills - mVarExp;
-  const remaining = Math.max(0, totalBills-onHand);
-  const daysLeft = isCurMon ? Math.max(1,totalDays-CD+1) : 1;
-  const needPerDay = remaining/daysLeft;
-  const monthPct = pct(onHand,totalBills);
+  // ── aggregations ─────────────────────────────────────────────────
+  const totalBills = bills.reduce((s, b) => s + billMonthlyCost(b, year, month), 0);
+  const dailyTarget = totalBills > 0 ? totalBills / totalDays : 0;
+
+  // all income entries this month
+  const allEntries = Object.values(log).flat();
+  const monthWolt = allEntries.filter(e => e.type === "income").reduce((s, e) => s + (parseFloat(e.wolt) || 0), 0);
+  const monthBolt = allEntries.filter(e => e.type === "income").reduce((s, e) => s + (parseFloat(e.bolt) || 0), 0);
+  const monthInc  = monthWolt + monthBolt;
+  const monthExp  = allEntries.filter(e => e.type === "expense").reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+
+  // T+1: received = earned before today
+  let received = 0;
+  Object.entries(log).forEach(([dk, entries]) => {
+    if (!isCurrent || dk < todayKey) {
+      entries.filter(e => e.type === "income").forEach(e => {
+        received += (parseFloat(e.wolt) || 0) + (parseFloat(e.bolt) || 0);
+      });
+    }
+  });
+
+  const netMonth   = received - totalBills - monthExp;
+  const remaining  = Math.max(0, totalBills - received);
+  const daysLeft   = isCurrent ? Math.max(1, totalDays - CD + 1) : 1;
+  const needPerDay = remaining / daysLeft;
+  const monthPct   = pct(received, totalBills);
 
   // today
-  const todayDD = isCurMon ? (dayData[todayStr]||{}) : {};
-  const todayInc = (parseFloat(todayDD.wolt)||0)+(parseFloat(todayDD.bolt)||0);
-  const todayExp = (todayDD.expenses||[]).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-  const todayNet = todayInc-todayExp;
-  const todayPct = pct(todayInc,dailyTarget);
-  const dayColor = todayPct>=100?"#22c55e":todayPct>=70?"#fbbf24":"#f97316";
+  const todayEntries = log[todayKey] || [];
+  const todayWolt    = todayEntries.filter(e => e.type === "income").reduce((s, e) => s + (parseFloat(e.wolt) || 0), 0);
+  const todayBolt    = todayEntries.filter(e => e.type === "income").reduce((s, e) => s + (parseFloat(e.bolt) || 0), 0);
+  const todayInc     = todayWolt + todayBolt;
+  const todayExp     = todayEntries.filter(e => e.type === "expense").reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+  const todayNet     = todayInc - todayExp;
+  const todayPct     = pct(todayInc, dailyTarget);
 
-  // arrived today (yesterday's work)
-  const yDD = isCurMon ? (dayData[yStr]||{}) : {};
-  const arrivedToday = (parseFloat(yDD.wolt)||0)+(parseFloat(yDD.bolt)||0);
+  // T+1 arrived today = yesterday's income
+  const yesterday = new Date(CY, CM, CD - 1);
+  const yKey = dateStr(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate());
+  const arrivedToday = (log[yKey] || []).filter(e => e.type === "income").reduce((s, e) => s + (parseFloat(e.wolt) || 0) + (parseFloat(e.bolt) || 0), 0);
 
-  // upcoming bills
-  const upcoming=[];
-  for(let off=0;off<=60;off++){
-    const dt=new Date(CY,CM,CD+off);
-    bills.forEach(b=>{
-      if(!parseFloat(b.amount))return;
-      if(b.day===dt.getDate()) upcoming.push({...b,daysAway:off,dtDate:`${dt.getDate()} ${MG[dt.getMonth()]}`,dtMon:dt.getMonth()});
+  // next payments in next 30 days
+  const upcoming = [];
+  for (let off = 0; off <= 30; off++) {
+    const dt = new Date(CY, CM, CD + off);
+    bills.forEach(b => {
+      if (!parseFloat(b.amount)) return;
+      const fires = b.freq === "weekly"
+        ? dt.getDay() === b.dow
+        : dt.getDate() === b.day;
+      if (fires) upcoming.push({ ...b, daysAway: off, dt });
     });
   }
-  const nextBill=upcoming[0]||null;
+  const nextBill = upcoming[0] || null;
 
-  // expense breakdown
-  const expBycat={};
-  for(let d=1;d<=totalDays;d++){
-    const dk=ds(year,mon,d);
-    (dayData[dk]?.expenses||[]).forEach(e=>{
-      if(!expBycat[e.cat]) expBycat[e.cat]={amount:0,cat:e.cat};
-      expBycat[e.cat].amount+=parseFloat(e.amount)||0;
-    });
-  }
-  const totalAllExp=totalBills+mVarExp;
-
-  // worked days
-  let workedDays=0;
-  for(let d=1;d<=totalDays;d++){
-    const dd=dayData[ds(year,mon,d)]||{};
-    if((parseFloat(dd.wolt)||0)+(parseFloat(dd.bolt)||0)>0) workedDays++;
-  }
-  const avgPerDay=workedDays>0?mInc/workedDays:0;
-
-  // ── mutations ─────────────────────────────────────────────────────────────
-  function mutDay(dateStr, fn) {
-    setDayData(prev=>{
-      const n={...prev};
-      if(!n[dateStr]) n[dateStr]={wolt:"",bolt:"",expenses:[],note:"",mood:"✅"};
-      fn(n[dateStr]);
-      LS.set(KD(year,mon),n);
-      return n;
-    });
+  // ── mutations ────────────────────────────────────────────────────
+  function mutLog(newLog) {
+    setLog(newLog);
+    LS.set(KEY_LOG(year, month), newLog);
   }
 
-  function openEdit(d) {
-    const dk=ds(year,mon,d);
-    const dd=dayData[dk]||{};
-    setEditDay(d);
-    setEWolt(dd.wolt||""); setEBolt(dd.bolt||"");
-    setENote(dd.note||""); setEMood(dd.mood||"✅");
-    setEExpCat("food"); setEExpAmt(""); setEExpLbl("");
+  function addIncome() {
+    const w = parseFloat(incWolt) || 0;
+    const b2 = parseFloat(incBolt) || 0;
+    if (!w && !b2) return;
+    const entry = { id: Date.now(), type: "income", wolt: String(w), bolt: String(b2), note: incNote, ts: new Date().toISOString() };
+    const cur = log[todayKey] || [];
+    mutLog({ ...log, [todayKey]: [...cur, entry] });
+    setIncWolt(""); setIncBolt(""); setIncNote("");
+    setShowAddIncome(false);
   }
 
-  function saveEdit() {
-    const dk=ds(year,mon,editDay);
-    mutDay(dk,d=>{d.wolt=eWolt;d.bolt=eBolt;d.note=eNote;d.mood=eMood;});
-    setEditDay(null);
+  function addExpense() {
+    const amt = parseFloat(expAmt);
+    if (!amt) return;
+    const cat = EXP_CATS.find(c => c.id === expCat);
+    const entry = { id: Date.now(), type: "expense", cat: expCat, label: expLabel || cat?.label || "Расход", amount: String(amt), ts: new Date().toISOString() };
+    const cur = log[todayKey] || [];
+    mutLog({ ...log, [todayKey]: [...cur, entry] });
+    setExpAmt(""); setExpLabel("");
+    setShowAddExp(false);
   }
 
-  function addExp() {
-    if(!parseFloat(eExpAmt))return;
-    const dk=ds(year,mon,editDay);
-    const cat=EXP_CATS.find(c=>c.id===eExpCat);
-    mutDay(dk,d=>{
-      if(!d.expenses)d.expenses=[];
-      d.expenses.push({id:Date.now(),cat:eExpCat,label:eExpLbl||cat?.label||"",amount:String(parseFloat(eExpAmt))});
-    });
-    setEExpAmt(""); setEExpLbl("");
+  function deleteEntry(dk, id) {
+    const updated = (log[dk] || []).filter(e => e.id !== id);
+    mutLog({ ...log, [dk]: updated });
   }
 
-  function delExp(dk,id) {
-    mutDay(dk,d=>{d.expenses=(d.expenses||[]).filter(e=>e.id!==id);});
+  function updateBill(id, field, val) {
+    const n = bills.map(b => b.id === id ? { ...b, [field]: val } : b);
+    setBills(n); LS.set(KEY_BILLS, n);
   }
 
-  function updateBill(id,f,v){const n=bills.map(b=>b.id===id?{...b,[f]:v}:b);setBills(n);LS.set(KB,n);}
-  function updatePaid(id,v){const n={...paid,[id]:v};setPaid(n);LS.set(KP(year,mon),n);}
-
-  function addGoal(){
-    const n=[...goals,{id:Date.now(),label:"",target:"",saved:"",deadline:"",status:"🔥"}];
-    setGoals(n);LS.set(KG(year),n);
+  function addBill() {
+    const nb = { id: "b" + Date.now(), label: "Новый платёж", icon: "💳", freq: "monthly", day: 1, dow: 4, amount: "" };
+    const n = [...bills, nb];
+    setBills(n); LS.set(KEY_BILLS, n);
   }
-  function updateGoal(id,f,v){const n=goals.map(g=>g.id===id?{...g,[f]:v}:g);setGoals(n);LS.set(KG(year),n);}
-  function delGoal(id){const n=goals.filter(g=>g.id!==id);setGoals(n);LS.set(KG(year),n);}
 
-  function prevMon(){if(mon===0){setYear(y=>y-1);setMon(11);}else setMon(m=>m-1);}
-  function nextMon(){if(mon===11){setYear(y=>y+1);setMon(0);}else setMon(m=>m+1);}
+  function deleteBill(id) {
+    const n = bills.filter(b => b.id !== id);
+    setBills(n); LS.set(KEY_BILLS, n);
+  }
 
-  // calendar grid
-  const firstDow=(new Date(year,mon,1).getDay()+6)%7;
-  const calCells=[];
-  for(let i=0;i<firstDow;i++) calCells.push(null);
-  for(let d=1;d<=totalDays;d++) calCells.push(d);
+  function addGoal() {
+    const n = [...goals, { id: "g" + Date.now(), label: "", target: "", saved: "", deadline: "" }];
+    setGoals(n); LS.set(KEY_GOALS, n);
+  }
 
-  const moods=["🔥","✅","😴","🌧"];
+  function updateGoal(id, f, v) {
+    const n = goals.map(g => g.id === id ? { ...g, [f]: v } : g);
+    setGoals(n); LS.set(KEY_GOALS, n);
+  }
 
+  function deleteGoal(id) {
+    const n = goals.filter(g => g.id !== id);
+    setGoals(n); LS.set(KEY_GOALS, n);
+  }
+
+  function prevMonth() { if (month === 0) { setYear(y => y - 1); setMonth(11); } else setMonth(m => m - 1); }
+  function nextMonth() { if (month === 11) { setYear(y => y + 1); setMonth(0); } else setMonth(m => m + 1); }
+
+  // ── colors ───────────────────────────────────────────────────────
+  const dayColor   = todayPct >= 100 ? "#22c55e" : todayPct >= 70 ? "#fbbf24" : "#f97316";
+  const monthColor = netMonth >= 0 ? "#22c55e" : "#f97316";
+
+  // ── calendar grid ────────────────────────────────────────────────
+  const firstDow = (new Date(year, month, 1).getDay() + 6) % 7;
+  const calCells = Array(firstDow).fill(null).concat(Array.from({ length: totalDays }, (_, i) => i + 1));
+
+  // ── render ───────────────────────────────────────────────────────
   return (
-    <div style={S.root}>
-      <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}} *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}`}</style>
+    <div style={R.root}>
+      <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+      <style>{`
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.2} }
+        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+        select { -webkit-appearance: none; appearance: none; }
+      `}</style>
 
-      {/* ── NAV ── */}
-      <div style={S.nav}>
-        {[["today","⚡"],["calendar","📅"],["month","📊"],["payments","💳"],["goals","🎯"],["settings","⚙️"]].map(([id,ic])=>(
-          <button key={id} style={{...S.nb,...(tab===id?S.nbOn:{})}} onClick={()=>setTab(id)}>{ic}</button>
+      {/* NAV */}
+      <div style={R.nav}>
+        {[["today","⚡"],["calendar","📅"],["month","📊"],["payments","💳"],["goals","🎯"],["settings","⚙️"]].map(([id, ic]) => (
+          <button key={id} onClick={() => setTab(id)}
+            style={{ ...R.navBtn, ...(tab === id ? R.navOn : {}) }}>{ic}</button>
         ))}
       </div>
 
-      {/* ══════ TODAY ══════ */}
-      {tab==="today"&&(<>
-        <div style={S.hdr}>
-          <div>
-            <div style={S.clock}>{HH}<span style={{animation:"pulse 2s ease-in-out infinite",display:"inline-block"}}>:</span>{MM}</div>
-            <div style={S.dstr}>{DW[NOW.getDay()]} · {CD} {MG[CM]} {CY}</div>
-          </div>
-          <div style={{textAlign:"right"}}>
-            <div style={S.logo}>🛵 КурьерP&L</div>
-            {arrivedToday>0&&<div style={S.arrived}>+{fz(arrivedToday)} zł пришло</div>}
-          </div>
-        </div>
-
-        {/* BIG PNL */}
-        <div style={{...S.pnlCard,borderColor:dayColor+"55"}}>
-          <div style={S.pnlRow}>
+      {/* ════════ TODAY ════════ */}
+      {tab === "today" && (
+        <div style={R.page}>
+          {/* header */}
+          <div style={R.hdr}>
             <div>
-              <div style={S.micro}>P&L СЕГОДНЯ · {HH}:{MM}</div>
-              <div style={{...S.pnlBig,color:dayColor}}>
-                {todayPct===0?"0%":todayPct>=100?`+${todayPct-100}%`:`−${100-todayPct}%`}
+              <div style={R.clock}>{HH}<span style={{ animation: "pulse 2s infinite" }}>:</span>{MM}</div>
+              <div style={R.dstr}>{DOW[now.getDay()]} · {CD} {MGE[CM]} {CY}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={R.logo}>🛵 КурьерP&L</div>
+              {arrivedToday > 0 && <div style={R.badge}>+{fz(arrivedToday)} zł пришло</div>}
+            </div>
+          </div>
+
+          {/* PNL card */}
+          <div style={{ ...R.card, borderColor: dayColor + "55", marginBottom: 10 }}>
+            <div style={R.micro}>P&L СЕГОДНЯ · {HH}:{MM}</div>
+            <div style={{ ...R.pnlBig, color: dayColor }}>
+              {todayPct === 0 ? "0%" : todayPct >= 100 ? `+${todayPct - 100}%` : `−${100 - todayPct}%`}
+            </div>
+            <div style={{ fontSize: 10, color: dayColor, fontFamily: "'JetBrains Mono'", marginBottom: 12 }}>
+              {todayPct >= 100 ? `+${fz(todayInc - dailyTarget)} zł сверх цели` :
+               todayPct > 0 ? `ещё ${fz(dailyTarget - todayInc)} zł до цели` :
+               `цель ${fz(dailyTarget)} zł`}
+            </div>
+
+            {/* stats row */}
+            <div style={R.row4}>
+              <div style={R.stat}><div style={R.stL}>Wolt</div><div style={{ ...R.stV, color: "#00c2e0" }}>{fz(todayWolt)}</div></div>
+              <div style={R.sdiv} />
+              <div style={R.stat}><div style={R.stL}>Bolt</div><div style={{ ...R.stV, color: "#34d45a" }}>{fz(todayBolt)}</div></div>
+              <div style={R.sdiv} />
+              <div style={R.stat}><div style={R.stL}>Расход</div><div style={{ ...R.stV, color: "#ef4444" }}>{fz(todayExp)}</div></div>
+              <div style={R.sdiv} />
+              <div style={R.stat}><div style={R.stL}>Нетто</div><div style={{ ...R.stV, color: todayNet >= 0 ? "#22c55e" : "#f97316" }}>{todayNet >= 0 ? "+" : ""}{fz(todayNet)}</div></div>
+            </div>
+
+            {/* bar */}
+            <div style={R.barTrack}><div style={{ ...R.barFill, width: `${todayPct}%`, background: dayColor }} /></div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#334155", fontFamily: "'JetBrains Mono'", marginTop: 4 }}>
+              <span>0</span><span>цель {fz(dailyTarget)} zł</span>
+            </div>
+          </div>
+
+          {/* month mini */}
+          <div style={{ ...R.card, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div>
+                <div style={R.micro}>МЕСЯЦ · {MRU[CM]}</div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: monthColor, letterSpacing: "-1px" }}>{monthPct}%</div>
               </div>
-              <div style={{fontSize:10,color:dayColor,fontFamily:"'JetBrains Mono'",marginTop:4}}>
-                {todayPct>=100?`+${fz(todayInc-dailyTarget)} zł сверх цели`:
-                 todayPct>0?`ещё ${fz(dailyTarget-todayInc)} zł до цели`:
-                 `цель ${fz(dailyTarget)} zł`}
-              </div>
-            </div>
-            <svg viewBox="0 0 100 60" style={{width:90,flexShrink:0}}>
-              <path d="M10 55 A45 45 0 0 1 90 55" fill="none" stroke="#182030" strokeWidth="10" strokeLinecap="round"/>
-              {todayPct>0&&<path d="M10 55 A45 45 0 0 1 90 55" fill="none" stroke={dayColor} strokeWidth="10" strokeLinecap="round"
-                strokeDasharray={`${Math.min(todayPct,100)*1.41} 999`} style={{transition:"stroke-dasharray .8s ease"}}/>}
-              <text x="50" y="50" textAnchor="middle" fill={dayColor} fontSize="13" fontWeight="900" fontFamily="'Unbounded'">{Math.min(todayPct,100)}%</text>
-            </svg>
-          </div>
-          <div style={S.statRow}>
-            <Stat l="Wolt" v={fz(parseFloat(todayDD.wolt)||0)} c="#00c2e0"/>
-            <div style={S.sd}/>
-            <Stat l="Bolt" v={fz(parseFloat(todayDD.bolt)||0)} c="#34d45a"/>
-            <div style={S.sd}/>
-            <Stat l="Расход" v={fz(todayExp)} c="#ef4444"/>
-            <div style={S.sd}/>
-            <Stat l="Нетто" v={(todayNet>=0?"+":"")+fz(todayNet)} c={todayNet>=0?"#22c55e":"#f97316"}/>
-          </div>
-          <div style={S.dayBar}><div style={{...S.dayBarF,width:`${Math.min(todayPct,100)}%`,background:dayColor}}/></div>
-        </div>
-
-        {/* ADVICE */}
-        {(()=>{
-          let emoji="🛵",text=`Цель ${fz(dailyTarget)} zł — начни смену`,color="#475569";
-          if(nextBill&&nextBill.daysAway===0&&onHand<parseFloat(nextBill.amount)){emoji="🚨";text=`Сегодня платёж ${nextBill.label} — срочно нужно ${fz(parseFloat(nextBill.amount)-onHand)} zł`;color="#ef4444";}
-          else if(nextBill&&nextBill.daysAway<=3&&onHand<parseFloat(nextBill.amount)){emoji="⚡";text=`Через ${nextBill.daysAway} дн платёж ${fz(parseFloat(nextBill.amount))} zł — поднажми`;color="#f97316";}
-          else if(todayPct>=130){emoji="🔥";text="Отличный день! Можешь заканчивать";color="#22c55e";}
-          else if(todayPct>=100){emoji="✅";text="Цель выполнена. Каждый заказ — чистый плюс";color="#22c55e";}
-          else if(needPerDay>dailyTarget*1.5){emoji="📊";text=`Отставание! Нужно ${fz(needPerDay)} zł/день`;color="#f97316";}
-          return <div style={{...S.advice,borderColor:color+"44"}}><span style={{fontSize:20}}>{emoji}</span><span style={{...S.advTxt,color}}>{text}</span></div>;
-        })()}
-
-        {/* MONTH MINI */}
-        <div style={S.card}>
-          <div style={S.cLabel}>МЕСЯЦ · {MR[CM]}</div>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-            <div>
-              <span style={{fontSize:26,fontWeight:900,color:netMonth>=0?"#22c55e":"#f97316",letterSpacing:"-2px"}}>{monthPct}%</span>
-              <span style={{fontSize:10,color:"#334155",marginLeft:6}}>цели</span>
-            </div>
-            <div style={{textAlign:"right"}}>
-              <div style={{fontSize:14,fontWeight:900,color:netMonth>=0?"#22c55e":"#f97316",fontFamily:"'JetBrains Mono'"}}>{netMonth>=0?"+":""}{fz(netMonth)} zł</div>
-              <div style={{fontSize:9,color:"#334155",fontFamily:"'JetBrains Mono'"}}>нетто месяца</div>
-            </div>
-          </div>
-          <div style={S.mBar}><div style={{...S.mBarF,width:`${Math.min(monthPct,100)}%`,background:monthPct>=100?"linear-gradient(90deg,#16a34a,#22c55e)":monthPct>=60?"linear-gradient(90deg,#d97706,#fbbf24)":"linear-gradient(90deg,#be123c,#f43f5e)"}}/></div>
-          <div style={{display:"flex",justifyContent:"space-between",marginTop:8,gap:8}}>
-            <MItem l="Получено" v={fz(onHand)+" zł"} c="#22c55e"/>
-            <MItem l="До нуля" v={fz(remaining)+" zł"} c="#fbbf24"/>
-            <MItem l="Нужно/день" v={fz(needPerDay)+" zł"} c={needPerDay>dailyTarget*1.3?"#ef4444":"#fbbf24"}/>
-          </div>
-        </div>
-
-        {/* NEXT PAYMENT */}
-        {nextBill&&(
-          <div style={{...S.nextCard,borderColor:nextBill.daysAway<=1?"#ef444466":nextBill.daysAway<=3?"#f9731666":nextBill.daysAway<=7?"#fbbf2444":"#182030"}}>
-            <span style={{fontSize:24}}>{nextBill.icon}</span>
-            <div style={{flex:1}}>
-              <div style={S.micro}>БЛИЖАЙШИЙ ПЛАТЁЖ</div>
-              <div style={{fontSize:12,fontWeight:700}}>{nextBill.label}</div>
-              <div style={{fontSize:9,color:"#475569",fontFamily:"'JetBrains Mono'",marginTop:2}}>{nextBill.dtDate}</div>
-              <div style={S.covBar}><div style={{...S.covFill,width:`${pct(Math.min(onHand,parseFloat(nextBill.amount)),parseFloat(nextBill.amount))}%`,background:onHand>=parseFloat(nextBill.amount)?"#22c55e":"#f97316"}}/></div>
-              <div style={{fontSize:8,color:"#334155",fontFamily:"'JetBrains Mono'",marginTop:2}}>{fz(Math.min(onHand,parseFloat(nextBill.amount)))} / {fz(parseFloat(nextBill.amount))} zł</div>
-            </div>
-            <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:17,fontWeight:900,fontFamily:"'JetBrains Mono'"}}>{fz(parseFloat(nextBill.amount))} zł</div>
-              <div style={{fontSize:11,fontWeight:700,fontFamily:"'JetBrains Mono'",color:nextBill.daysAway===0?"#ef4444":nextBill.daysAway<=3?"#f97316":nextBill.daysAway<=7?"#fbbf24":"#22c55e"}}>
-                {nextBill.daysAway===0?"⚠️ СЕГОДНЯ":nextBill.daysAway===1?"ЗАВТРА":`через ${nextBill.daysAway} дн`}
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 14, fontWeight: 900, color: monthColor, fontFamily: "'JetBrains Mono'" }}>{netMonth >= 0 ? "+" : ""}{fz(netMonth)} zł</div>
+                <div style={{ fontSize: 9, color: "#334155", fontFamily: "'JetBrains Mono'" }}>нетто месяца</div>
+                <div style={{ fontSize: 9, color: "#fbbf24", fontFamily: "'JetBrains Mono'", marginTop: 2 }}>нужно {fz(needPerDay)} zł/день</div>
               </div>
             </div>
-          </div>
-        )}
-
-        {/* TODAY DETAIL */}
-        <div style={S.card}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div style={S.cLabel}>СЕГОДНЯ — {CD} {MG[CM]}</div>
-            <button style={S.editBtn} onClick={()=>openEdit(CD)}>✏️ Внести данные</button>
-          </div>
-          {todayInc===0&&todayExp===0
-            ? <div style={S.empty}>Нажми «Внести данные» чтобы добавить заработок за сегодня</div>
-            : <>
-              {(parseFloat(todayDD.wolt)||0)>0&&<ERow icon="🔵" label="Wolt" val={fz(parseFloat(todayDD.wolt))} color="#00c2e0"/>}
-              {(parseFloat(todayDD.bolt)||0)>0&&<ERow icon="🟢" label="Bolt" val={fz(parseFloat(todayDD.bolt))} color="#34d45a"/>}
-              {(todayDD.expenses||[]).map(e=>{
-                const cat=EXP_CATS.find(c=>c.id===e.cat);
-                return <ERow key={e.id} icon={cat?.icon||"📦"} label={e.label} val={`−${fz(parseFloat(e.amount))}`} color="#ef4444"
-                  onDel={()=>delExp(todayStr,e.id)}/>;
-              })}
-              {todayDD.note&&<div style={{fontSize:10,color:"#475569",fontFamily:"'JetBrains Mono'",marginTop:6,fontStyle:"italic"}}>💬 {todayDD.note}</div>}
-            </>
-          }
-        </div>
-        <div style={{height:20}}/>
-      </>)}
-
-      {/* ══════ CALENDAR ══════ */}
-      {tab==="calendar"&&(
-        <div style={S.body}>
-          <div style={S.monNav}>
-            <button style={S.mnBtn} onClick={prevMon}>‹</button>
-            <span style={S.monLbl}>{MR[mon]} {year}</span>
-            <button style={S.mnBtn} onClick={nextMon}>›</button>
+            <div style={R.barTrack}><div style={{ ...R.barFill, width: `${monthPct}%`, background: monthPct >= 100 ? "linear-gradient(90deg,#16a34a,#22c55e)" : monthPct >= 60 ? "linear-gradient(90deg,#d97706,#fbbf24)" : "linear-gradient(90deg,#be123c,#f43f5e)" }} /></div>
           </div>
 
-          {/* calendar grid */}
-          <div style={S.calGrid}>
-            {["Пн","Вт","Ср","Чт","Пт","Сб","Вс"].map(w=><div key={w} style={S.calWd}>{w}</div>)}
-            {calCells.map((d,i)=>{
-              if(!d) return <div key={"e"+i}/>;
-              const dk=ds(year,mon,d);
-              const dd=dayData[dk]||{};
-              const inc=(parseFloat(dd.wolt)||0)+(parseFloat(dd.bolt)||0);
-              const exp=(dd.expenses||[]).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-              const net=inc-exp;
-              const isT=isCurMon&&d===CD;
-              const isFut=isCurMon&&d>CD;
-              return(
-                <div key={d} style={{...S.calCell,...(isT?S.calToday:{}),...(inc>0?{borderColor:net>=0?"#16a34a55":"#ef444433"}:{}),...(isFut?{opacity:.4}:{})}}
-                  onClick={()=>{if(!isFut){openEdit(d);setTab("edit");}}} >
-                  <div style={{...S.calDN,...(isT?{color:"#60a5fa"}:{color:inc>0?"#e2e8f0":"#334155"})}}>{d}</div>
-                  {dd.mood&&inc>0&&<div style={{fontSize:9,lineHeight:1}}>{dd.mood}</div>}
-                  {inc>0&&<div style={{fontSize:7,color:"#22c55e",fontFamily:"'JetBrains Mono'"}}>+{fi(inc)}</div>}
-                  {exp>0&&<div style={{fontSize:7,color:"#f97316",fontFamily:"'JetBrains Mono'"}}>−{fi(exp)}</div>}
-                  {inc>0&&<div style={{fontSize:7,fontFamily:"'JetBrains Mono'",color:net>=0?"#22c55e":"#f97316",fontWeight:700}}>{net>=0?"+":""}{fi(net)}</div>}
+          {/* next payment */}
+          {nextBill && (
+            <div style={{ ...R.card, borderColor: nextBill.daysAway <= 1 ? "#ef444466" : nextBill.daysAway <= 3 ? "#f9731666" : "#182030", marginBottom: 10, display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ fontSize: 26 }}>{nextBill.icon}</div>
+              <div style={{ flex: 1 }}>
+                <div style={R.micro}>БЛИЖАЙШИЙ ПЛАТЁЖ</div>
+                <div style={{ fontSize: 12, fontWeight: 700 }}>{nextBill.label}</div>
+                <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono'" }}>
+                  {nextBill.freq === "weekly" ? `Каждый ${DOW[nextBill.dow]}` : `${nextBill.day}-го числа`} · {nextBill.dt.getDate()} {MGE[nextBill.dt.getMonth()]}
                 </div>
-              );
-            })}
-          </div>
-          <div style={S.calLeg}>
-            <span style={{color:"#22c55e"}}>+доход</span>
-            <span style={{color:"#f97316"}}>−расход</span>
-            <span style={{color:"#94a3b8"}}>=нетто</span>
-            <span style={{color:"#60a5fa"}}>●сегодня</span>
-          </div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 16, fontWeight: 900, fontFamily: "'JetBrains Mono'" }}>{fz(parseFloat(nextBill.amount))} zł</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: nextBill.daysAway === 0 ? "#ef4444" : nextBill.daysAway <= 3 ? "#f97316" : "#22c55e", fontFamily: "'JetBrains Mono'" }}>
+                  {nextBill.daysAway === 0 ? "⚠️ СЕГОДНЯ" : nextBill.daysAway === 1 ? "ЗАВТРА" : `через ${nextBill.daysAway} дн`}
+                </div>
+              </div>
+            </div>
+          )}
 
-          {/* day list */}
-          <div style={{marginTop:4}}>
-            {Array.from({length:totalDays},(_,i)=>i+1).reverse().map(d=>{
-              const dk=ds(year,mon,d);
-              const dd=dayData[dk]||{};
-              const inc=(parseFloat(dd.wolt)||0)+(parseFloat(dd.bolt)||0);
-              const exp=(dd.expenses||[]).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-              const net=inc-exp;
-              const dp=pct(inc,dailyTarget);
-              if(!inc&&!exp&&!dd.note) return null;
-              const isFut=isCurMon&&d>CD;
-              if(isFut) return null;
-              return(
-                <div key={d} style={S.dayRow} onClick={()=>{openEdit(d);setTab("edit");}}>
-                  <div style={S.dayNum}>
-                    <div style={{fontSize:16,fontWeight:900,color:"#94a3b8",lineHeight:1}}>{d}</div>
-                    <div style={{fontSize:8,color:"#253347",fontFamily:"'JetBrains Mono'"}}>{DW[new Date(year,mon,d).getDay()]}</div>
-                    {dd.mood&&<div style={{fontSize:11}}>{dd.mood}</div>}
+          {/* today entries */}
+          {todayEntries.length > 0 && (
+            <div style={{ ...R.card, marginBottom: 10 }}>
+              <div style={R.micro}>ЗАПИСИ СЕГОДНЯ</div>
+              {todayEntries.map(e => (
+                <div key={e.id} style={R.entRow}>
+                  <span style={R.entTime}>{new Date(e.ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>
+                  <div style={{ flex: 1 }}>
+                    {e.type === "income" ? (
+                      <span style={{ fontSize: 11 }}>
+                        {parseFloat(e.wolt) > 0 && <span style={{ color: "#00c2e0", marginRight: 8 }}>W {fz(parseFloat(e.wolt))}</span>}
+                        {parseFloat(e.bolt) > 0 && <span style={{ color: "#34d45a" }}>B {fz(parseFloat(e.bolt))}</span>}
+                        {e.note && <span style={{ color: "#475569", fontSize: 9, marginLeft: 6 }}>{e.note}</span>}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: 11, color: "#ef4444" }}>
+                        {EXP_CATS.find(c => c.id === e.cat)?.icon} {e.label}
+                      </span>
+                    )}
                   </div>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <span style={{fontFamily:"'JetBrains Mono'",fontSize:13,fontWeight:700,color:"#22c55e"}}>{fz(inc)} zł</span>
-                      <span style={{...S.pctBdg,color:dp>=100?"#22c55e":dp>=70?"#fbbf24":"#f97316",borderColor:dp>=100?"#16a34a33":"#f9731633"}}>{dp}%</span>
-                    </div>
-                    {exp>0&&<div style={{fontSize:9,color:"#ef4444",fontFamily:"'JetBrains Mono'"}}>расход {fz(exp)} · нетто {net>=0?"+":""}{fz(net)}</div>}
-                    {dd.note&&<div style={{fontSize:9,color:"#475569",fontFamily:"'JetBrains Mono'",marginTop:2}}>💬 {dd.note}</div>}
-                    {(dd.expenses||[]).map(e=>{
-                      const cat=EXP_CATS.find(c=>c.id===e.cat);
-                      return <span key={e.id} style={{fontSize:8,color:cat?.color||"#94a3b8",fontFamily:"'JetBrains Mono'",marginRight:6}}>{cat?.icon} {e.label} {fz(parseFloat(e.amount))}</span>;
-                    })}
-                  </div>
+                  <span style={{ fontFamily: "'JetBrains Mono'", fontSize: 11, fontWeight: 700, color: e.type === "income" ? "#22c55e" : "#ef4444" }}>
+                    {e.type === "income" ? "+" : "−"}{fz(e.type === "income" ? (parseFloat(e.wolt) || 0) + (parseFloat(e.bolt) || 0) : parseFloat(e.amount))}
+                  </span>
+                  <button onClick={() => deleteEntry(todayKey, e.id)} style={R.delBtn}>✕</button>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ══════ EDIT DAY (modal-like tab) ══════ */}
-      {tab==="edit"&&editDay!==null&&(()=>{
-        const dk=ds(year,mon,editDay);
-        const dd=dayData[dk]||{};
-        const inc=(parseFloat(dd.wolt)||0)+(parseFloat(dd.bolt)||0);
-        const exp=(dd.expenses||[]).reduce((s,e)=>s+(parseFloat(e.amount)||0),0);
-        const net=inc-exp;
-        const dp=pct(inc,dailyTarget);
-        return(
-          <div style={S.body}>
-            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
-              <button style={S.back} onClick={()=>setTab("calendar")}>← Назад</button>
-              <div style={{fontSize:14,fontWeight:700}}>{editDay} {MG[mon]} {year} · {DW[new Date(year,mon,editDay).getDay()]}</div>
+              ))}
             </div>
+          )}
 
-            {/* summary */}
-            {inc>0&&(
-              <div style={{...S.card,marginBottom:12,borderColor:net>=0?"#16a34a33":"#ef444433"}}>
-                <div style={{display:"flex",justifyContent:"space-between"}}>
-                  <div><div style={S.micro}>ИТОГ ДНЯ</div><div style={{fontSize:20,fontWeight:900,color:"#22c55e",fontFamily:"'JetBrains Mono'"}}>{fz(inc)} zł</div></div>
-                  <div style={{textAlign:"right"}}><div style={{fontSize:13,fontWeight:700,color:net>=0?"#22c55e":"#f97316",fontFamily:"'JetBrains Mono'"}}>{net>=0?"+":""}{fz(net)} нетто</div><div style={{...S.pctBdg,color:dp>=100?"#22c55e":dp>=70?"#fbbf24":"#f97316",borderColor:"transparent",marginTop:4}}>{dp}% цели</div></div>
+          <div style={{ height: 100 }} />
+
+          {/* ADD BUTTONS */}
+          {!showAddIncome && !showAddExp && (
+            <div style={R.fabRow}>
+              <button style={{ ...R.fab, background: "linear-gradient(135deg,#16a34a,#15803d)", flex: 1 }}
+                onClick={() => setShowAddIncome(true)}>
+                ＋ Доход
+              </button>
+              <button style={{ ...R.fab, background: "linear-gradient(135deg,#b45309,#d97706)", flex: 1 }}
+                onClick={() => setShowAddExp(true)}>
+                ＋ Расход
+              </button>
+            </div>
+          )}
+
+          {/* ADD INCOME PANEL */}
+          {showAddIncome && (
+            <div style={R.panel}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#22c55e" }}>💰 Добавить доход</div>
+                <button onClick={() => setShowAddIncome(false)} style={R.closeBtn}>✕</button>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={R.label}>🔵 Wolt (zł)</div>
+                  <input style={R.inp} type="number" min="0" placeholder="0.00"
+                    inputMode="decimal" value={incWolt}
+                    onChange={e => setIncWolt(e.target.value)} autoFocus />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={R.label}>🟢 Bolt (zł)</div>
+                  <input style={R.inp} type="number" min="0" placeholder="0.00"
+                    inputMode="decimal" value={incBolt}
+                    onChange={e => setIncBolt(e.target.value)} />
                 </div>
               </div>
-            )}
-
-            {/* income */}
-            <div style={S.card}>
-              <div style={S.cLabel}>ДОХОД</div>
-              <div style={{display:"flex",gap:8,marginBottom:8}}>
-                <div style={{flex:1}}>
-                  <div style={S.fl}><span style={{...S.dot,background:"#00c2e0"}}/>Wolt (zł)</div>
-                  <input style={S.inp} type="number" min="0" placeholder="0.00" inputMode="decimal" value={eWolt} onChange={e=>setEWolt(e.target.value)}/>
-                </div>
-                <div style={{flex:1}}>
-                  <div style={S.fl}><span style={{...S.dot,background:"#34d45a"}}/>Bolt (zł)</div>
-                  <input style={S.inp} type="number" min="0" placeholder="0.00" inputMode="decimal" value={eBolt} onChange={e=>setEBolt(e.target.value)}/>
-                </div>
+              <input style={{ ...R.inp, marginBottom: 12 }} type="text"
+                placeholder="Заметка (необязательно)" value={incNote}
+                onChange={e => setIncNote(e.target.value)} />
+              <div style={{ fontSize: 8, color: "#334155", fontFamily: "'JetBrains Mono'", marginBottom: 10 }}>
+                ⏳ T+1: деньги придут завтра — учтутся в балансе завтра
               </div>
-              <div style={S.fl}>Настроение дня</div>
-              <div style={{display:"flex",gap:8,marginBottom:10}}>
-                {moods.map(m=>(
-                  <button key={m} style={{...S.moodBtn,...(eMood===m?S.moodOn:{})}} onClick={()=>setEMood(m)}>{m}</button>
+              <button style={{ ...R.fab, background: "linear-gradient(135deg,#16a34a,#15803d)" }}
+                onClick={addIncome}>✓ Записать</button>
+            </div>
+          )}
+
+          {/* ADD EXPENSE PANEL */}
+          {showAddExp && (
+            <div style={R.panel}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#f97316" }}>💸 Добавить расход</div>
+                <button onClick={() => setShowAddExp(false)} style={R.closeBtn}>✕</button>
+              </div>
+              <div style={R.label}>Категория</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                {EXP_CATS.map(c => (
+                  <button key={c.id}
+                    style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid", fontSize: 11, cursor: "pointer",
+                      background: expCat === c.id ? "#182030" : "#0b0f1b",
+                      borderColor: expCat === c.id ? "#f97316" : "#253347",
+                      color: expCat === c.id ? "#e2e8f0" : "#475569",
+                      fontFamily: "'JetBrains Mono'" }}
+                    onClick={() => setExpCat(c.id)}>
+                    {c.icon} {c.label}
+                  </button>
                 ))}
               </div>
-              <div style={S.fl}>Заметка</div>
-              <input style={{...S.inp,marginBottom:10}} type="text" placeholder="Как прошёл день…" value={eNote} onChange={e=>setENote(e.target.value)}/>
-              <button style={S.saveBtn} onClick={saveEdit}>✓ Сохранить доход</button>
-            </div>
-
-            {/* expenses */}
-            <div style={S.card}>
-              <div style={S.cLabel}>РАСХОДЫ ДНЯ</div>
-              {(dd.expenses||[]).map(e=>{
-                const cat=EXP_CATS.find(c=>c.id===e.cat);
-                return(
-                  <div key={e.id} style={S.expItm}>
-                    <span style={{fontSize:16}}>{cat?.icon||"📦"}</span>
-                    <span style={{flex:1,fontSize:11}}>{e.label}</span>
-                    <span style={{color:"#ef4444",fontFamily:"'JetBrains Mono'",fontSize:11,fontWeight:700}}>{fz(parseFloat(e.amount))} zł</span>
-                    <button style={S.delBtn2} onClick={()=>delExp(dk,e.id)}>✕</button>
-                  </div>
-                );
-              })}
-              {(dd.expenses||[]).length===0&&<div style={S.empty}>Нет расходов</div>}
-              <div style={{marginTop:10}}>
-                <div style={S.fl}>Категория</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:8}}>
-                  {EXP_CATS.map(c=>(
-                    <button key={c.id} style={{...S.catBtn,...(eExpCat===c.id?{...S.catOn,borderColor:c.color,color:c.color}:{})}} onClick={()=>setEExpCat(c.id)}>
-                      {c.icon} {c.label}
-                    </button>
-                  ))}
-                </div>
-                <div style={S.fl}>Название (необязательно)</div>
-                <input style={{...S.inp,marginBottom:7}} type="text" placeholder={EXP_CATS.find(c=>c.id===eExpCat)?.label} value={eExpLbl} onChange={e=>setEExpLbl(e.target.value)}/>
-                <div style={S.fl}>Сумма (zł)</div>
-                <input style={{...S.inp,marginBottom:9}} type="number" min="0" placeholder="0.00" inputMode="decimal" value={eExpAmt} onChange={e=>setEExpAmt(e.target.value)}/>
-                <button style={{...S.saveBtn,background:"linear-gradient(135deg,#b45309,#d97706)"}} onClick={addExp}>＋ Добавить расход</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ══════ MONTH STATS ══════ */}
-      {tab==="month"&&(
-        <div style={S.body}>
-          <div style={S.monNav}>
-            <button style={S.mnBtn} onClick={prevMon}>‹</button>
-            <span style={S.monLbl}>{MR[mon]} {year}</span>
-            <button style={S.mnBtn} onClick={nextMon}>›</button>
-          </div>
-
-          {/* main stats */}
-          <div style={S.card}>
-            <div style={S.cLabel}>ИТОГИ МЕСЯЦА</div>
-            <div style={{display:"flex",gap:0,marginBottom:12}}>
-              <BigStat l="Заработано" v={fz(mInc)} u="zł" c="#22c55e"/>
-              <div style={S.sd}/>
-              <BigStat l="Получено" v={fz(onHand)} u="zł" c="#60a5fa"/>
-              <div style={S.sd}/>
-              <BigStat l="Нетто" v={(netMonth>=0?"+":"")+fz(netMonth)} u="zł" c={netMonth>=0?"#22c55e":"#f97316"}/>
-            </div>
-            <div style={S.mBar}><div style={{...S.mBarF,width:`${Math.min(monthPct,100)}%`,background:monthPct>=100?"linear-gradient(90deg,#16a34a,#22c55e)":monthPct>=60?"linear-gradient(90deg,#d97706,#fbbf24)":"linear-gradient(90deg,#be123c,#f43f5e)"}}/></div>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:8,color:"#334155",fontFamily:"'JetBrains Mono'",marginTop:4,marginBottom:12}}>
-              <span>0</span><span>{fz(onHand)} получено</span><span>цель {fz(totalBills)} zł</span>
-            </div>
-            <StatRow l="Wolt" v={fz(mWolt)+" zł"} c="#00c2e0"/>
-            <StatRow l="Bolt" v={fz(mBolt)+" zł"} c="#34d45a"/>
-            <StatRow l="Дней работал" v={workedDays+" дн"}/>
-            <StatRow l="Среднее в день" v={fz(avgPerDay)+" zł"} c="#60a5fa"/>
-            <StatRow l="Цель в день" v={fz(dailyTarget)+" zł"} c="#fbbf24"/>
-            <StatRow l="Нужно ещё/день" v={fz(needPerDay)+" zł"} c={needPerDay>dailyTarget*1.3?"#ef4444":"#fbbf24"}/>
-            <StatRow l="Дней осталось" v={String(daysLeft)}/>
-          </div>
-
-          {/* expense breakdown */}
-          <div style={S.card}>
-            <div style={S.cLabel}>РАСХОДЫ МЕСЯЦА</div>
-            <StatRow l="Постоянные (платежи)" v={fz(totalBills)+" zł"} c="#818cf8"/>
-            <StatRow l="Переменные (ежедневные)" v={fz(mVarExp)+" zł"} c="#f97316"/>
-            <StatRow l="ИТОГО" v={fz(totalAllExp)+" zł"} c="#ef4444" bold/>
-            <div style={{marginTop:12}}>
-              {EXP_CATS.map(cat=>{
-                const amt=expBycat[cat.id]?.amount||0;
-                if(!amt) return null;
-                const p=totalAllExp>0?Math.round((amt/totalAllExp)*100):0;
-                return(
-                  <div key={cat.id} style={{marginBottom:8}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}>
-                      <span>{cat.icon} {cat.label}</span>
-                      <span style={{color:cat.color,fontFamily:"'JetBrains Mono'"}}>{fz(amt)} zł · {p}%</span>
-                    </div>
-                    <div style={{height:5,background:"#182030",borderRadius:99,overflow:"hidden"}}>
-                      <div style={{height:"100%",width:`${p}%`,background:cat.color,borderRadius:99}}/>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* mood stats */}
-          {Object.keys(moodCount).length>0&&(
-            <div style={S.card}>
-              <div style={S.cLabel}>НАСТРОЕНИЕ МЕСЯЦА</div>
-              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-                {moods.filter(m=>moodCount[m]).map(m=>(
-                  <div key={m} style={{textAlign:"center"}}>
-                    <div style={{fontSize:24}}>{m}</div>
-                    <div style={{fontSize:11,fontWeight:700,fontFamily:"'JetBrains Mono'"}}>{moodCount[m]} дн</div>
-                  </div>
-                ))}
-              </div>
+              <div style={R.label}>Описание (необязательно)</div>
+              <input style={{ ...R.inp, marginBottom: 10 }} type="text"
+                placeholder="Что именно…" value={expLabel}
+                onChange={e => setExpLabel(e.target.value)} />
+              <div style={R.label}>Сумма (zł)</div>
+              <input style={{ ...R.inp, marginBottom: 12 }} type="number" min="0"
+                placeholder="0.00" inputMode="decimal" value={expAmt}
+                onChange={e => setExpAmt(e.target.value)} />
+              <button style={{ ...R.fab, background: "linear-gradient(135deg,#b45309,#d97706)" }}
+                onClick={addExpense}>✓ Записать</button>
             </div>
           )}
         </div>
       )}
 
-      {/* ══════ PAYMENTS ══════ */}
-      {tab==="payments"&&(
-        <div style={S.body}>
-          <div style={S.monNav}>
-            <button style={S.mnBtn} onClick={prevMon}>‹</button>
-            <span style={S.monLbl}>{MR[mon]} {year}</span>
-            <button style={S.mnBtn} onClick={nextMon}>›</button>
+      {/* ════════ CALENDAR ════════ */}
+      {tab === "calendar" && (
+        <div style={R.page}>
+          <div style={R.monNav}>
+            <button style={R.mnBtn} onClick={prevMonth}>‹</button>
+            <span style={R.monLbl}>{MRU[month]} {year}</span>
+            <button style={R.mnBtn} onClick={nextMonth}>›</button>
           </div>
 
-          <div style={S.card}>
-            <div style={S.cLabel}>СТАТУС ПЛАТЕЖЕЙ</div>
-            <StatRow l="Всего к оплате" v={fz(totalBills)+" zł"} c="#ef4444"/>
-            <StatRow l="Оплачено" v={fz(mPaid)+" zł"} c="#22c55e"/>
-            <StatRow l="Остаток" v={fz(Math.max(0,totalBills-mPaid))+" zł"} c="#fbbf24"/>
-            <div style={S.mBar}><div style={{...S.mBarF,width:`${pct(mPaid,totalBills)}%`,background:"linear-gradient(90deg,#16a34a,#22c55e)"}}/></div>
+          <div style={R.calGrid}>
+            {["Пн","Вт","Ср","Чт","Пт","Сб","Вс"].map(w => (
+              <div key={w} style={R.calWd}>{w}</div>
+            ))}
+            {calCells.map((d, i) => {
+              if (!d) return <div key={"e" + i} />;
+              const dk = dateStr(year, month, d);
+              const entries = log[dk] || [];
+              const inc = entries.filter(e => e.type === "income").reduce((s, e) => s + (parseFloat(e.wolt) || 0) + (parseFloat(e.bolt) || 0), 0);
+              const exp = entries.filter(e => e.type === "expense").reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+              const net = inc - exp;
+              const isToday = isCurrent && d === CD;
+              const isFuture = isCurrent && d > CD;
+              const dp = pct(inc, dailyTarget);
+              return (
+                <div key={d}
+                  style={{ ...R.calCell, ...(isToday ? R.calToday : {}), ...(isFuture ? { opacity: 0.35 } : {}), ...(inc > 0 ? { borderColor: net >= 0 ? "#16a34a55" : "#ef444433" } : {}) }}
+                  onClick={() => !isFuture && setDayModal(dk)}>
+                  <div style={{ ...R.calDN, color: isToday ? "#60a5fa" : inc > 0 ? "#e2e8f0" : "#334155" }}>{d}</div>
+                  {inc > 0 && <div style={{ fontSize: 7, color: "#22c55e", fontFamily: "'JetBrains Mono'" }}>+{Math.round(inc)}</div>}
+                  {exp > 0 && <div style={{ fontSize: 7, color: "#f97316", fontFamily: "'JetBrains Mono'" }}>−{Math.round(exp)}</div>}
+                  {inc > 0 && <div style={{ fontSize: 7, fontWeight: 700, color: net >= 0 ? "#22c55e" : "#f97316", fontFamily: "'JetBrains Mono'" }}>{dp}%</div>}
+                </div>
+              );
+            })}
           </div>
 
-          {upcoming.slice(0,8).map((b,i)=>{
-            const amt=parseFloat(b.amount)||0;
-            const paidAmt=parseFloat(paid[b.id])||0;
-            const p=pct(Math.min(onHand,amt),amt);
-            return(
-              <div key={b.id+i} style={{...S.payCard,borderColor:b.daysAway===0?"#ef444466":b.daysAway<=3?"#f9731666":b.daysAway<=7?"#fbbf2444":"#182030"}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-                  <div>
-                    <div style={{fontSize:8,color:b.daysAway<=1?"#ef4444":b.daysAway<=3?"#f97316":b.daysAway<=7?"#fbbf24":"#475569",fontFamily:"'JetBrains Mono'",marginBottom:3}}>
-                      {b.daysAway===0?"⚠️ СЕГОДНЯ":b.daysAway===1?"ЗАВТРА":`через ${b.daysAway} дн · ${b.dtDate}`}
-                    </div>
-                    <div style={{fontSize:13,fontWeight:700}}>{b.icon} {b.label}</div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:16,fontWeight:900,fontFamily:"'JetBrains Mono'",color:paidAmt>=amt?"#22c55e":"#e2e8f0"}}>{fz(amt)} zł</div>
-                    {paidAmt>=amt?<div style={{fontSize:9,color:"#22c55e"}}>✓ оплачено</div>:onHand<amt?<div style={{fontSize:9,color:"#ef4444",fontFamily:"'JetBrains Mono'"}}>−{fz(amt-onHand)} zł</div>:null}
-                  </div>
+          {/* day list */}
+          {Object.keys(log).filter(dk => {
+            const [y, m] = dk.split("-").map(Number);
+            return y === year && m === month + 1;
+          }).sort((a, b) => b.localeCompare(a)).map(dk => {
+            const entries = log[dk] || [];
+            const inc = entries.filter(e => e.type === "income").reduce((s, e) => s + (parseFloat(e.wolt) || 0) + (parseFloat(e.bolt) || 0), 0);
+            const exp = entries.filter(e => e.type === "expense").reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+            const d = parseInt(dk.split("-")[2]);
+            const dp = pct(inc, dailyTarget);
+            if (!inc && !exp) return null;
+            return (
+              <div key={dk} style={R.dayRow} onClick={() => setDayModal(dk)}>
+                <div style={R.dayNum}>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: "#94a3b8", lineHeight: 1 }}>{d}</div>
+                  <div style={{ fontSize: 8, color: "#334155", fontFamily: "'JetBrains Mono'" }}>{DOW[new Date(dk + "T12:00").getDay()]}</div>
                 </div>
-                <div style={{height:6,background:"#182030",borderRadius:99,overflow:"hidden",marginBottom:6}}>
-                  <div style={{height:"100%",width:`${Math.min(p,100)}%`,background:p>=100?"#22c55e":p>=60?"#fbbf24":"#f97316",borderRadius:99,transition:"width .5s"}}/>
-                </div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:8,color:"#334155",fontFamily:"'JetBrains Mono'"}}>{fz(Math.min(onHand,amt))} / {fz(amt)} zł накоплено</span>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}>
-                    <span style={{fontSize:9,color:"#475569",fontFamily:"'JetBrains Mono'"}}>оплачено:</span>
-                    <input style={{...S.inp,width:80,padding:"4px 8px",fontSize:12,textAlign:"right"}}
-                      type="number" min="0" placeholder="0" value={paid[b.id]||""}
-                      onChange={e=>updatePaid(b.id,e.target.value)}/>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#22c55e", fontFamily: "'JetBrains Mono'" }}>{fz(inc)} zł</span>
+                    <span style={{ fontSize: 9, fontFamily: "'JetBrains Mono'", fontWeight: 700, border: "1px solid", borderRadius: 20, padding: "2px 7px", color: dp >= 100 ? "#22c55e" : dp >= 70 ? "#fbbf24" : "#f97316", borderColor: dp >= 100 ? "#16a34a33" : "#f9731633" }}>{dp}%</span>
                   </div>
+                  {exp > 0 && <div style={{ fontSize: 9, color: "#ef4444", fontFamily: "'JetBrains Mono'" }}>расход: {fz(exp)} zł · нетто: {(inc - exp) >= 0 ? "+" : ""}{fz(inc - exp)}</div>}
                 </div>
               </div>
             );
           })}
+          <div style={{ height: 20 }} />
         </div>
       )}
 
-      {/* ══════ GOALS ══════ */}
-      {tab==="goals"&&(
-        <div style={S.body}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontSize:14,fontWeight:700,color:"#94a3b8"}}>🎯 Мои цели</div>
-            <button style={S.addGoalBtn} onClick={addGoal}>＋ Новая цель</button>
+      {/* ════════ MONTH ════════ */}
+      {tab === "month" && (
+        <div style={R.page}>
+          <div style={R.monNav}>
+            <button style={R.mnBtn} onClick={prevMonth}>‹</button>
+            <span style={R.monLbl}>{MRU[month]} {year}</span>
+            <button style={R.mnBtn} onClick={nextMonth}>›</button>
           </div>
 
-          {goals.length===0&&<div style={S.empty}>Нажми «Новая цель» чтобы добавить</div>}
-          {goals.map(g=>{
-            const p=parseFloat(g.target)>0?pct(parseFloat(g.saved),parseFloat(g.target)):0;
-            const left=Math.max(0,(parseFloat(g.target)||0)-(parseFloat(g.saved)||0));
-            return(
-              <div key={g.id} style={S.goalCard}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-                  <input style={{...S.inp,flex:1,marginRight:8,fontSize:13,fontWeight:700}} placeholder="На что коплю…" value={g.label} onChange={e=>updateGoal(g.id,"label",e.target.value)}/>
-                  <button style={S.delGBtn} onClick={()=>delGoal(g.id)}>✕</button>
-                </div>
-                <div style={{display:"flex",gap:8,marginBottom:8}}>
-                  <div style={{flex:1}}>
-                    <div style={S.fl}>Нужно (zł)</div>
-                    <input style={S.inp} type="number" placeholder="0" value={g.target} onChange={e=>updateGoal(g.id,"target",e.target.value)}/>
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={S.fl}>Накоплено (zł)</div>
-                    <input style={S.inp} type="number" placeholder="0" value={g.saved} onChange={e=>updateGoal(g.id,"saved",e.target.value)}/>
-                  </div>
-                  <div style={{flex:1}}>
-                    <div style={S.fl}>Дедлайн</div>
-                    <input style={{...S.inp,fontSize:11}} type="date" value={g.deadline} onChange={e=>updateGoal(g.id,"deadline",e.target.value)}/>
-                  </div>
-                </div>
-                {parseFloat(g.target)>0&&(<>
-                  <div style={{height:8,background:"#182030",borderRadius:99,overflow:"hidden",marginBottom:5}}>
-                    <div style={{height:"100%",width:`${Math.min(p,100)}%`,background:p>=100?"linear-gradient(90deg,#16a34a,#22c55e)":p>=60?"linear-gradient(90deg,#d97706,#fbbf24)":"linear-gradient(90deg,#1d4ed8,#60a5fa)",borderRadius:99,transition:"width .5s"}}/>
-                  </div>
-                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,fontFamily:"'JetBrains Mono'"}}>
-                    <span style={{color:p>=100?"#22c55e":"#60a5fa"}}>{p}% · {fz(parseFloat(g.saved)||0)} zł</span>
-                    {p<100&&<span style={{color:"#334155"}}>осталось {fz(left)} zł</span>}
-                    {p>=100&&<span style={{color:"#22c55e"}}>✓ Цель достигнута!</span>}
-                  </div>
-                </>)}
-                <div style={{display:"flex",gap:6,marginTop:8}}>
-                  {["🔥","⏸","✅"].map(s=>(
-                    <button key={s} style={{...S.moodBtn,...(g.status===s?S.moodOn:{})}} onClick={()=>updateGoal(g.id,"status",s)}>{s}</button>
-                  ))}
-                </div>
+          <div style={{ ...R.card, marginBottom: 10 }}>
+            <div style={R.micro}>ИТОГИ МЕСЯЦА</div>
+            {[
+              ["Заработано",       fz(monthInc) + " zł",     "#22c55e"],
+              ["Получено (T+1)",   fz(received) + " zł",     "#60a5fa"],
+              ["Расходы (переем.)",fz(monthExp) + " zł",     "#ef4444"],
+              ["Платежи",          fz(totalBills) + " zł",   "#ef4444"],
+              ["Нетто",            (netMonth >= 0 ? "+" : "") + fz(netMonth) + " zł", netMonth >= 0 ? "#22c55e" : "#f97316"],
+              ["Wolt",             fz(monthWolt) + " zł",    "#00c2e0"],
+              ["Bolt",             fz(monthBolt) + " zł",    "#34d45a"],
+              ["Цель в день",      fz(dailyTarget) + " zł",  "#fbbf24"],
+              ["Нужно сейчас/день",fz(needPerDay) + " zł",   needPerDay > dailyTarget * 1.3 ? "#ef4444" : "#fbbf24"],
+              ["Выполнение",       monthPct + "%",            monthPct >= 100 ? "#22c55e" : "#f97316"],
+            ].map(([l, v, c]) => (
+              <div key={l} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #182030", fontSize: 11 }}>
+                <span style={{ color: "#475569" }}>{l}</span>
+                <span style={{ color: c, fontFamily: "'JetBrains Mono'", fontWeight: 700 }}>{v}</span>
               </div>
-            );
-          })}
+            ))}
+          </div>
+
+          {/* expense breakdown */}
+          <div style={{ ...R.card, marginBottom: 10 }}>
+            <div style={R.micro}>РАСХОДЫ ПО КАТЕГОРИЯМ</div>
+            {EXP_CATS.map(cat => {
+              const amt = allEntries.filter(e => e.type === "expense" && e.cat === cat.id).reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
+              if (!amt) return null;
+              const p = monthExp > 0 ? Math.round((amt / monthExp) * 100) : 0;
+              return (
+                <div key={cat.id} style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, marginBottom: 3 }}>
+                    <span>{cat.icon} {cat.label}</span>
+                    <span style={{ fontFamily: "'JetBrains Mono'" }}>{fz(amt)} zł · {p}%</span>
+                  </div>
+                  <div style={{ height: 5, background: "#182030", borderRadius: 99, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${p}%`, background: "#f97316", borderRadius: 99 }} />
+                  </div>
+                </div>
+              );
+            })}
+            {monthExp === 0 && <div style={R.empty}>Нет расходов</div>}
+          </div>
         </div>
       )}
 
-      {/* ══════ SETTINGS ══════ */}
-      {tab==="settings"&&(
-        <div style={S.body}>
-          <div style={{fontSize:14,fontWeight:700,color:"#94a3b8",marginBottom:14}}>⚙️ Мои платежи</div>
-          <div style={S.infoBox}>Введи сумму и число месяца когда списывается каждый платёж. Это основа всех расчётов.</div>
-          {bills.map(b=>(
-            <div key={b.id} style={S.setCard}>
-              <div style={{fontSize:22,width:28,marginTop:6,flexShrink:0}}>{b.icon}</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:11,fontWeight:700,color:b.color||"#94a3b8",marginBottom:7}}>{b.label}</div>
-                <div style={{display:"flex",gap:8}}>
-                  <div style={{flex:2}}>
-                    <div style={S.fl}>Сумма (zł)</div>
-                    <input style={S.inp} type="number" min="0" placeholder="0" inputMode="decimal"
-                      value={b.amount} onChange={e=>updateBill(b.id,"amount",e.target.value)}/>
+      {/* ════════ PAYMENTS ════════ */}
+      {tab === "payments" && (
+        <div style={R.page}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#94a3b8", marginBottom: 12 }}>💳 Платежи</div>
+          <div style={{ ...R.card, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "4px 0", borderBottom: "1px solid #182030", marginBottom: 4 }}>
+              <span style={{ color: "#475569" }}>Итого в месяц</span>
+              <span style={{ color: "#ef4444", fontFamily: "'JetBrains Mono'", fontWeight: 700 }}>{fz(totalBills)} zł</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "4px 0" }}>
+              <span style={{ color: "#475569" }}>Цель в день</span>
+              <span style={{ color: "#fbbf24", fontFamily: "'JetBrains Mono'", fontWeight: 700 }}>{fz(dailyTarget)} zł</span>
+            </div>
+          </div>
+
+          {upcoming.slice(0, 6).map((b, i) => (
+            <div key={b.id + i} style={{ ...R.card, marginBottom: 8, borderColor: b.daysAway <= 1 ? "#ef444466" : b.daysAway <= 3 ? "#f9731666" : "#182030" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 8, color: b.daysAway <= 1 ? "#ef4444" : b.daysAway <= 3 ? "#f97316" : "#475569", fontFamily: "'JetBrains Mono'", marginBottom: 4 }}>
+                    {b.daysAway === 0 ? "⚠️ СЕГОДНЯ" : b.daysAway === 1 ? "ЗАВТРА" : `через ${b.daysAway} дн · ${b.dt.getDate()} ${MGE[b.dt.getMonth()]}`}
                   </div>
-                  <div style={{flex:1}}>
-                    <div style={S.fl}>Число</div>
-                    <input style={S.inp} type="number" min="1" max="31" placeholder="1"
-                      value={b.day} onChange={e=>updateBill(b.id,"day",parseInt(e.target.value)||1)}/>
+                  <div style={{ fontSize: 13, fontWeight: 700 }}>{b.icon} {b.label}</div>
+                  <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono'" }}>
+                    {b.freq === "weekly" ? `Каждый ${DOW[b.dow]} · ${weeklyCount(b.dow, CY, CM)}× в месяц` : `${b.day}-го числа`}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 18, fontWeight: 900, fontFamily: "'JetBrains Mono'" }}>{fz(parseFloat(b.amount))} zł</div>
+                  <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono'" }}>
+                    {b.freq === "weekly" ? `× ${weeklyCount(b.dow, CY, CM)} = ${fz(billMonthlyCost(b, CY, CM))} в мес` : "в месяц"}
                   </div>
                 </div>
               </div>
             </div>
           ))}
-          <div style={{textAlign:"right",fontFamily:"'JetBrains Mono'",fontSize:11,color:"#475569",marginTop:8}}>
-            Итого: <span style={{color:"#ef4444"}}>{fz(totalBills)} zł / мес</span>
+        </div>
+      )}
+
+      {/* ════════ GOALS ════════ */}
+      {tab === "goals" && (
+        <div style={R.page}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#94a3b8" }}>🎯 Мои цели</div>
+            <button style={R.addBtn} onClick={addGoal}>＋ Добавить</button>
           </div>
-          <div style={{textAlign:"right",fontFamily:"'JetBrains Mono'",fontSize:11,color:"#475569",marginTop:4,marginBottom:20}}>
-            Цель в день: <span style={{color:"#fbbf24"}}>{fz(dailyTarget)} zł</span>
+          {goals.length === 0 && <div style={R.empty}>Нажми «Добавить» чтобы создать цель</div>}
+          {goals.map(g => {
+            const p = parseFloat(g.target) > 0 ? pct(parseFloat(g.saved), parseFloat(g.target)) : 0;
+            const left = Math.max(0, (parseFloat(g.target) || 0) - (parseFloat(g.saved) || 0));
+            return (
+              <div key={g.id} style={{ ...R.card, marginBottom: 10 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                  <input style={{ ...R.inp, flex: 1, fontSize: 13, fontWeight: 700 }} placeholder="На что коплю…"
+                    value={g.label} onChange={e => updateGoal(g.id, "label", e.target.value)} />
+                  <button style={{ ...R.delBtn, fontSize: 16 }} onClick={() => deleteGoal(g.id)}>✕</button>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={R.label}>Нужно (zł)</div>
+                    <input style={R.inp} type="number" min="0" placeholder="0" inputMode="decimal"
+                      value={g.target} onChange={e => updateGoal(g.id, "target", e.target.value)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={R.label}>Накоплено (zł)</div>
+                    <input style={R.inp} type="number" min="0" placeholder="0" inputMode="decimal"
+                      value={g.saved} onChange={e => updateGoal(g.id, "saved", e.target.value)} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={R.label}>Дедлайн</div>
+                    <input style={{ ...R.inp, fontSize: 11 }} type="date"
+                      value={g.deadline} onChange={e => updateGoal(g.id, "deadline", e.target.value)} />
+                  </div>
+                </div>
+                {parseFloat(g.target) > 0 && (
+                  <>
+                    <div style={{ height: 8, background: "#182030", borderRadius: 99, overflow: "hidden", marginBottom: 6 }}>
+                      <div style={{ height: "100%", width: `${p}%`, background: p >= 100 ? "linear-gradient(90deg,#16a34a,#22c55e)" : "linear-gradient(90deg,#1d4ed8,#60a5fa)", borderRadius: 99, transition: "width .5s" }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, fontFamily: "'JetBrains Mono'" }}>
+                      <span style={{ color: p >= 100 ? "#22c55e" : "#60a5fa" }}>{p}% · {fz(parseFloat(g.saved) || 0)} zł</span>
+                      {p < 100 && <span style={{ color: "#334155" }}>осталось {fz(left)} zł</span>}
+                      {p >= 100 && <span style={{ color: "#22c55e" }}>✅ Цель достигнута!</span>}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ════════ SETTINGS ════════ */}
+      {tab === "settings" && (
+        <div style={R.page}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#94a3b8" }}>⚙️ Мои платежи</div>
+            <button style={R.addBtn} onClick={addBill}>＋ Добавить</button>
           </div>
-          <div style={S.infoBox}>
-            {"T+1: Wolt и Bolt переводят деньги на следующий день после смены. Поэтому «Получено» — это только вчерашний и более ранний заработок. Сегодняшний заработок придёт завтра."}
+          <div style={R.infoBox}>Аренда скутера — выбери «Еженед.» и день «Чт». Аренда квартиры — «В месяц» и число «1».</div>
+
+          {bills.map(b => (
+            <div key={b.id} style={{ ...R.card, marginBottom: 10, flexDirection: "column", gap: 10 }}>
+              {/* name + icon + delete */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <select value={b.icon} onChange={e => updateBill(b.id, "icon", e.target.value)}
+                  style={{ ...R.inp, width: 50, padding: "8px 4px", fontSize: 20, textAlign: "center", flexShrink: 0 }}>
+                  {["🏠","🛵","📱","🌐","💳","🍲","⛽","🚬","💊","📦","🎯","🚗","✈️","👕"].map(ic => <option key={ic} value={ic}>{ic}</option>)}
+                </select>
+                <input style={{ ...R.inp, flex: 1, fontSize: 13, fontWeight: 700 }} type="text"
+                  placeholder="Название платежа" value={b.label}
+                  onChange={e => updateBill(b.id, "label", e.target.value)} />
+                <button style={{ ...R.delBtn, fontSize: 18, padding: "0 6px" }} onClick={() => deleteBill(b.id)}>✕</button>
+              </div>
+
+              {/* amount + frequency */}
+              <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={R.label}>Сумма (zł)</div>
+                  <input style={{ ...R.inp, fontSize: 15, fontWeight: 700 }} type="number" min="0"
+                    placeholder="0" inputMode="decimal" value={b.amount}
+                    onChange={e => updateBill(b.id, "amount", e.target.value)} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={R.label}>Частота</div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {[["monthly", "В месяц"], ["weekly", "Еженед."]].map(([fr, lbl]) => (
+                      <button key={fr} onClick={() => updateBill(b.id, "freq", fr)}
+                        style={{ flex: 1, padding: "9px 4px", borderRadius: 7, border: "1px solid", fontSize: 9, cursor: "pointer",
+                          fontFamily: "'Unbounded',sans-serif", fontWeight: 700,
+                          background: b.freq === fr ? "#1e3a5f" : "#0b0f1b",
+                          borderColor: b.freq === fr ? "#3b82f6" : "#253347",
+                          color: b.freq === fr ? "#e2e8f0" : "#475569" }}>
+                        {lbl}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* day picker */}
+              {b.freq === "monthly" ? (
+                <div>
+                  <div style={R.label}>Число месяца когда списывается</div>
+                  <input style={{ ...R.inp, width: 100 }} type="number" min="1" max="31"
+                    placeholder="1" value={b.day || 1}
+                    onChange={e => updateBill(b.id, "day", parseInt(e.target.value) || 1)} />
+                </div>
+              ) : (
+                <div>
+                  <div style={R.label}>День недели</div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {DOW.map((d, i) => (
+                      <button key={i} onClick={() => updateBill(b.id, "dow", i)}
+                        style={{ flex: 1, padding: "7px 2px", borderRadius: 7, border: "1px solid", fontSize: 10, cursor: "pointer",
+                          fontFamily: "'JetBrains Mono'",
+                          background: (b.dow === i) ? "#1e3a5f" : "#0b0f1b",
+                          borderColor: (b.dow === i) ? "#3b82f6" : "#253347",
+                          color: (b.dow === i) ? "#e2e8f0" : "#475569" }}>
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono'", marginTop: 6 }}>
+                    В {MRU[month]}: {weeklyCount(b.dow, year, month)}× · итого {fz(billMonthlyCost(b, year, month))} zł
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+
+          <div style={{ ...R.card, marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "5px 0", borderBottom: "1px solid #182030" }}>
+              <span style={{ color: "#475569" }}>Итого расходов</span>
+              <span style={{ color: "#ef4444", fontFamily: "'JetBrains Mono'", fontWeight: 700 }}>{fz(totalBills)} zł / мес</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "5px 0" }}>
+              <span style={{ color: "#475569" }}>Минимум в день</span>
+              <span style={{ color: "#fbbf24", fontFamily: "'JetBrains Mono'", fontWeight: 700 }}>{fz(dailyTarget)} zł</span>
+            </div>
+          </div>
+          <div style={R.infoBox}>T+1: Wolt и Bolt переводят деньги на следующий день. Баланс считается только из полученных денег.</div>
+        </div>
+      )}
+
+      {/* ════════ DAY MODAL ════════ */}
+      {dayModal && (
+        <div style={R.overlay} onClick={e => { if (e.target === e.currentTarget) setDayModal(null); }}>
+          <div style={R.modal}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 900 }}>
+                {parseInt(dayModal.split("-")[2])} {MGE[parseInt(dayModal.split("-")[1]) - 1]} {dayModal.split("-")[0]}
+              </div>
+              <button style={R.closeBtn} onClick={() => setDayModal(null)}>✕</button>
+            </div>
+            {(log[dayModal] || []).map(e => (
+              <div key={e.id} style={R.entRow}>
+                <span style={R.entTime}>{new Date(e.ts).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</span>
+                <div style={{ flex: 1 }}>
+                  {e.type === "income" ? (
+                    <span style={{ fontSize: 11 }}>
+                      {parseFloat(e.wolt) > 0 && <span style={{ color: "#00c2e0", marginRight: 8 }}>Wolt {fz(parseFloat(e.wolt))}</span>}
+                      {parseFloat(e.bolt) > 0 && <span style={{ color: "#34d45a" }}>Bolt {fz(parseFloat(e.bolt))}</span>}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "#ef4444" }}>
+                      {EXP_CATS.find(c => c.id === e.cat)?.icon} {e.label}
+                    </span>
+                  )}
+                </div>
+                <span style={{ fontFamily: "'JetBrains Mono'", fontSize: 11, fontWeight: 700, color: e.type === "income" ? "#22c55e" : "#ef4444" }}>
+                  {e.type === "income" ? "+" : "−"}{fz(e.type === "income" ? (parseFloat(e.wolt) || 0) + (parseFloat(e.bolt) || 0) : parseFloat(e.amount))}
+                </span>
+                <button onClick={() => deleteEntry(dayModal, e.id)} style={R.delBtn}>✕</button>
+              </div>
+            ))}
+            {(log[dayModal] || []).length === 0 && <div style={R.empty}>Нет записей за этот день</div>}
           </div>
         </div>
       )}
@@ -727,98 +782,50 @@ export default function App() {
   );
 }
 
-// ─── sub-components ───────────────────────────────────────────────────────
-function Stat({l,v,c="#e2e8f0"}) {
-  return <div style={{flex:1,textAlign:"center",padding:"8px 4px"}}>
-    <div style={{fontSize:7,color:"#253347",fontFamily:"'JetBrains Mono'",marginBottom:3}}>{l}</div>
-    <div style={{fontSize:11,fontWeight:700,fontFamily:"'JetBrains Mono'",color:c}}>{v}</div>
-  </div>;
-}
-function BigStat({l,v,u,c="#e2e8f0"}) {
-  return <div style={{flex:1,textAlign:"center",padding:"8px 4px"}}>
-    <div style={{fontSize:7,color:"#253347",fontFamily:"'JetBrains Mono'",marginBottom:3}}>{l}</div>
-    <div style={{fontSize:14,fontWeight:900,fontFamily:"'JetBrains Mono'",color:c,letterSpacing:"-0.5px"}}>{v}<span style={{fontSize:9,fontWeight:400}}> {u}</span></div>
-  </div>;
-}
-function StatRow({l,v,c="#94a3b8",bold}) {
-  return <div style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:"1px solid #182030",fontSize:11}}>
-    <span style={{color:"#475569"}}>{l}</span>
-    <span style={{color:c,fontFamily:"'JetBrains Mono'",fontWeight:bold?700:500}}>{v}</span>
-  </div>;
-}
-function MItem({l,v,c="#94a3b8"}) {
-  return <div style={{flex:1,textAlign:"center"}}>
-    <div style={{fontSize:7,color:"#253347",fontFamily:"'JetBrains Mono'",marginBottom:2}}>{l}</div>
-    <div style={{fontSize:10,fontWeight:700,fontFamily:"'JetBrains Mono'",color:c}}>{v}</div>
-  </div>;
-}
-function ERow({icon,label,val,color,onDel}) {
-  return <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderTop:"1px solid #182030"}}>
-    <span style={{fontSize:14}}>{icon}</span>
-    <span style={{flex:1,fontSize:11,color:"#94a3b8"}}>{label}</span>
-    <span style={{fontFamily:"'JetBrains Mono'",fontSize:11,fontWeight:700,color}}>{val} zł</span>
-    {onDel&&<button style={{background:"none",border:"none",color:"#253347",cursor:"pointer",fontSize:11}} onClick={onDel}>✕</button>}
-  </div>;
-}
-
-// ─── styles ───────────────────────────────────────────────────────────────
-const S = {
-  root:{fontFamily:"'Unbounded',sans-serif",background:"#060911",minHeight:"100vh",color:"#e2e8f0",maxWidth:480,margin:"0 auto"},
-  nav:{display:"flex",background:"#0b0f1b",borderBottom:"1px solid #182030",position:"sticky",top:0,zIndex:50},
-  nb:{flex:1,padding:"12px 4px",background:"none",border:"none",borderBottom:"2px solid transparent",color:"#253347",fontSize:18,cursor:"pointer"},
-  nbOn:{color:"#e2e8f0",borderBottom:"2px solid #3b82f6"},
-  hdr:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",padding:"14px 14px 10px",background:"#0b0f1b"},
-  clock:{fontSize:30,fontWeight:900,fontFamily:"'JetBrains Mono'",letterSpacing:-2,lineHeight:1},
-  dstr:{fontSize:9,color:"#334155",fontFamily:"'JetBrains Mono'",marginTop:2},
-  logo:{fontSize:13,fontWeight:900,letterSpacing:"-0.5px"},
-  arrived:{background:"#052e16",border:"1px solid #16a34a44",color:"#22c55e",fontSize:8,fontFamily:"'JetBrains Mono'",padding:"3px 8px",borderRadius:20,marginTop:4,display:"inline-block"},
-  pnlCard:{margin:"0 12px 10px",background:"#0b0f1b",border:"1px solid",borderRadius:14,padding:"14px"},
-  pnlRow:{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12},
-  micro:{fontSize:7,color:"#253347",fontFamily:"'JetBrains Mono'",letterSpacing:1,marginBottom:4},
-  pnlBig:{fontSize:42,fontWeight:900,letterSpacing:"-3px",lineHeight:1},
-  statRow:{display:"flex",background:"#0f1826",borderRadius:9,overflow:"hidden",marginBottom:10},
-  sd:{width:1,background:"#182030"},
-  dayBar:{height:6,background:"#182030",borderRadius:99,overflow:"hidden"},
-  dayBarF:{height:"100%",borderRadius:99,transition:"width .8s ease"},
-  advice:{margin:"0 12px 10px",display:"flex",alignItems:"center",gap:10,border:"1px solid",borderRadius:10,padding:"10px 12px",background:"#0b0f1b"},
-  advTxt:{fontSize:11,fontWeight:700,lineHeight:1.4,flex:1},
-  card:{margin:"0 12px 10px",background:"#0b0f1b",border:"1px solid #182030",borderRadius:12,padding:"12px 13px"},
-  cLabel:{fontSize:7,color:"#253347",fontFamily:"'JetBrains Mono'",letterSpacing:1,marginBottom:9},
-  mBar:{height:7,background:"#182030",borderRadius:99,overflow:"hidden"},
-  mBarF:{height:"100%",borderRadius:99,transition:"width .6s ease"},
-  nextCard:{margin:"0 12px 10px",border:"1px solid",borderRadius:12,padding:"13px",display:"flex",alignItems:"flex-start",gap:10,background:"#0b0f1b"},
-  covBar:{height:5,background:"#182030",borderRadius:99,overflow:"hidden",marginTop:6},
-  covFill:{height:"100%",borderRadius:99,transition:"width .5s"},
-  editBtn:{background:"#182030",border:"1px solid #253347",color:"#60a5fa",fontSize:10,padding:"5px 10px",borderRadius:7,cursor:"pointer",fontFamily:"'JetBrains Mono'"},
-  empty:{textAlign:"center",color:"#1e2d40",fontSize:10,padding:"16px 0",fontFamily:"'JetBrains Mono'"},
-  body:{padding:"12px 12px 80px"},
-  monNav:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14},
-  monLbl:{fontSize:14,fontWeight:700,color:"#94a3b8"},
-  mnBtn:{background:"#182030",border:"1px solid #253347",color:"#e2e8f0",width:34,height:34,borderRadius:8,fontSize:18,cursor:"pointer"},
-  calGrid:{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:8},
-  calWd:{fontSize:7,color:"#253347",textAlign:"center",padding:"3px 0",fontFamily:"'JetBrains Mono'"},
-  calCell:{background:"#0b0f1b",border:"1px solid #182030",borderRadius:6,padding:"3px 2px",minHeight:52,cursor:"pointer"},
-  calToday:{background:"#0c1628",border:"1px solid #1d4ed8"},
-  calDN:{fontSize:10,fontWeight:700,marginBottom:1},
-  calLeg:{display:"flex",gap:10,fontSize:8,justifyContent:"center",marginBottom:10,fontFamily:"'JetBrains Mono'"},
-  dayRow:{background:"#0b0f1b",border:"1px solid #182030",borderRadius:10,padding:"10px 12px",marginBottom:8,display:"flex",gap:10,cursor:"pointer"},
-  dayNum:{textAlign:"center",minWidth:32},
-  pctBdg:{fontSize:8,fontFamily:"'JetBrains Mono'",fontWeight:700,border:"1px solid",borderRadius:20,padding:"2px 6px"},
-  back:{background:"none",border:"none",color:"#60a5fa",fontSize:12,cursor:"pointer",fontFamily:"'Unbounded',sans-serif",fontWeight:700,padding:0},
-  expItm:{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderTop:"1px solid #182030"},
-  fl:{fontSize:8,color:"#475569",fontFamily:"'JetBrains Mono'",marginBottom:4,display:"flex",alignItems:"center",gap:4},
-  inp:{width:"100%",background:"#182030",border:"1px solid #253347",borderRadius:7,padding:"9px 10px",color:"#e2e8f0",fontSize:14,fontFamily:"'JetBrains Mono'",outline:"none"},
-  moodBtn:{flex:1,padding:"8px 4px",background:"#182030",border:"1px solid #253347",borderRadius:8,fontSize:18,cursor:"pointer"},
-  moodOn:{background:"#1e2d40",border:"1px solid #3b82f6"},
-  saveBtn:{width:"100%",padding:12,borderRadius:9,border:"none",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"'Unbounded',sans-serif",background:"linear-gradient(135deg,#16a34a,#15803d)"},
-  catBtn:{padding:"5px 10px",background:"#182030",border:"1px solid #253347",borderRadius:20,color:"#475569",fontSize:9,cursor:"pointer",fontFamily:"'JetBrains Mono'"},
-  catOn:{background:"#0f1826",color:"#e2e8f0"},
-  delBtn2:{background:"none",border:"none",color:"#253347",cursor:"pointer",fontSize:12},
-  payCard:{background:"#0b0f1b",border:"1px solid",borderRadius:12,padding:"13px",marginBottom:10},
-  goalCard:{background:"#0b0f1b",border:"1px solid #182030",borderRadius:12,padding:"13px",marginBottom:10},
-  addGoalBtn:{background:"linear-gradient(135deg,#1d4ed8,#2563eb)",border:"none",color:"#fff",fontSize:10,fontWeight:700,padding:"8px 14px",borderRadius:9,cursor:"pointer",fontFamily:"'Unbounded',sans-serif"},
-  delGBtn:{background:"none",border:"none",color:"#253347",cursor:"pointer",fontSize:14,flexShrink:0},
-  setCard:{background:"#0b0f1b",border:"1px solid #182030",borderRadius:11,padding:"11px 12px",marginBottom:9,display:"flex",gap:10},
-  infoBox:{fontSize:9,color:"#253347",fontFamily:"'JetBrains Mono'",background:"#0b0f1b",border:"1px solid #182030",borderRadius:8,padding:"9px 11px",marginBottom:12,lineHeight:1.8},
-  dot:{display:"inline-block",width:6,height:6,borderRadius:99,flexShrink:0},
+// ── styles ───────────────────────────────────────────────────────
+const R = {
+  root: { fontFamily: "'Unbounded',sans-serif", background: "#060911", minHeight: "100vh", color: "#e2e8f0", maxWidth: 480, margin: "0 auto" },
+  nav: { display: "flex", background: "#0b0f1b", borderBottom: "1px solid #182030", position: "sticky", top: 0, zIndex: 50 },
+  navBtn: { flex: 1, padding: "12px 4px", background: "none", border: "none", borderBottom: "2px solid transparent", color: "#253347", fontSize: 18, cursor: "pointer" },
+  navOn: { color: "#e2e8f0", borderBottom: "2px solid #3b82f6" },
+  page: { padding: "12px 13px 100px" },
+  hdr: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 },
+  clock: { fontSize: 30, fontWeight: 900, fontFamily: "'JetBrains Mono'", letterSpacing: -2, lineHeight: 1 },
+  dstr: { fontSize: 9, color: "#334155", fontFamily: "'JetBrains Mono'", marginTop: 2 },
+  logo: { fontSize: 13, fontWeight: 900 },
+  badge: { background: "#052e16", border: "1px solid #16a34a44", color: "#22c55e", fontSize: 8, fontFamily: "'JetBrains Mono'", padding: "3px 8px", borderRadius: 20, marginTop: 4, display: "inline-block" },
+  card: { background: "#0b0f1b", border: "1px solid #182030", borderRadius: 12, padding: "12px 13px", display: "flex", flexDirection: "column" },
+  micro: { fontSize: 7, color: "#253347", fontFamily: "'JetBrains Mono'", letterSpacing: 1, marginBottom: 6 },
+  pnlBig: { fontSize: 42, fontWeight: 900, letterSpacing: "-3px", lineHeight: 1 },
+  row4: { display: "flex", background: "#0f1826", borderRadius: 9, overflow: "hidden", marginBottom: 10 },
+  stat: { flex: 1, padding: "8px 4px", textAlign: "center" },
+  stL: { fontSize: 7, color: "#253347", fontFamily: "'JetBrains Mono'", marginBottom: 3 },
+  stV: { fontSize: 11, fontWeight: 700, fontFamily: "'JetBrains Mono'" },
+  sdiv: { width: 1, background: "#182030" },
+  barTrack: { height: 7, background: "#182030", borderRadius: 99, overflow: "hidden" },
+  barFill: { height: "100%", borderRadius: 99, transition: "width .6s ease" },
+  monNav: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 },
+  monLbl: { fontSize: 14, fontWeight: 700, color: "#94a3b8" },
+  mnBtn: { background: "#182030", border: "1px solid #253347", color: "#e2e8f0", width: 34, height: 34, borderRadius: 8, fontSize: 18, cursor: "pointer" },
+  calGrid: { display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2, marginBottom: 10 },
+  calWd: { fontSize: 7, color: "#253347", textAlign: "center", padding: "3px 0", fontFamily: "'JetBrains Mono'" },
+  calCell: { background: "#0b0f1b", border: "1px solid #182030", borderRadius: 6, padding: "4px 2px", minHeight: 52, cursor: "pointer" },
+  calToday: { background: "#0c1628", border: "1px solid #1d4ed8" },
+  calDN: { fontSize: 10, fontWeight: 700, marginBottom: 1, textAlign: "center" },
+  dayRow: { background: "#0b0f1b", border: "1px solid #182030", borderRadius: 10, padding: "10px 12px", marginBottom: 8, display: "flex", gap: 10, cursor: "pointer" },
+  dayNum: { textAlign: "center", minWidth: 30 },
+  entRow: { display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderTop: "1px solid #182030" },
+  entTime: { fontSize: 8, color: "#253347", fontFamily: "'JetBrains Mono'", minWidth: 32 },
+  delBtn: { background: "none", border: "none", color: "#253347", cursor: "pointer", fontSize: 12, padding: "0 2px" },
+  fabRow: { position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, display: "flex", gap: 8, padding: "10px 13px 22px", background: "linear-gradient(to top, #060911 70%, transparent)", zIndex: 100 },
+  fab: { padding: 14, borderRadius: 12, border: "none", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Unbounded',sans-serif" },
+  panel: { position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "#0d1221", borderTop: "1px solid #253347", padding: "16px 14px 28px", zIndex: 100 },
+  closeBtn: { background: "none", border: "none", color: "#475569", fontSize: 18, cursor: "pointer" },
+  inp: { width: "100%", background: "#182030", border: "1px solid #253347", borderRadius: 8, padding: "10px 11px", color: "#e2e8f0", fontSize: 14, fontFamily: "'JetBrains Mono'", outline: "none" },
+  label: { fontSize: 8, color: "#475569", fontFamily: "'JetBrains Mono'", marginBottom: 5, marginTop: 2 },
+  infoBox: { fontSize: 9, color: "#253347", fontFamily: "'JetBrains Mono'", background: "#0b0f1b", border: "1px solid #182030", borderRadius: 8, padding: "9px 11px", marginBottom: 12, lineHeight: 1.8 },
+  addBtn: { background: "linear-gradient(135deg,#1d4ed8,#2563eb)", border: "none", color: "#fff", fontSize: 10, fontWeight: 700, padding: "8px 14px", borderRadius: 9, cursor: "pointer", fontFamily: "'Unbounded',sans-serif" },
+  overlay: { position: "fixed", inset: 0, background: "#00000099", zIndex: 200, display: "flex", alignItems: "flex-end" },
+  modal: { background: "#0b0f1b", border: "1px solid #253347", borderRadius: "16px 16px 0 0", padding: "18px 14px 32px", width: "100%", maxWidth: 480, margin: "0 auto", maxHeight: "80vh", overflowY: "auto" },
+  empty: { textAlign: "center", color: "#1e2d40", fontSize: 10, padding: "20px 0", fontFamily: "'JetBrains Mono'" },
 };

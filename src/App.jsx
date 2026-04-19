@@ -29,11 +29,14 @@ const weeklyCount = (dow, y, m) => {
 };
 
 // Total monthly cost of a bill
-const billCost = (b, y, m) => {
+// dayCount: how many days to use for daily bills
+// For current month: days remaining (today..end)
+// For past months: full month
+const billCost = (b, y, m, dayCount) => {
   const amt = parseFloat(b.amount) || 0;
   if (!amt) return 0;
   if (b.freq === "weekly") return amt * weeklyCount(parseInt(b.dow) || 4, y, m);
-  if (b.freq === "daily")  return amt * dim(y, m);
+  if (b.freq === "daily")  return amt * (dayCount || dim(y, m));
   return amt; // monthly
 };
 
@@ -107,11 +110,14 @@ export default function App() {
   const totalDays = dim(vYear, vMon);
 
   // ── BILLS CALCULATION ────────────────────────────────────────
-  // Total monthly bills for viewed month
-  const totalBills = bills.reduce((s, b) => s + billCost(b, vYear, vMon), 0);
-
-  // Daily target = bills / days remaining (from today if current month)
+  // Days remaining in month (from today for current, full for past)
   const daysLeft = isCurMon ? Math.max(1, totalDays - CD + 1) : totalDays;
+
+  // Daily bills (еда/сигареты/топливо) × daysLeft, not full month
+  // Fixed bills (аренда/телефон) × 1, weekly × count in month
+  const totalBills = bills.reduce((s, b) => s + billCost(b, vYear, vMon, daysLeft), 0);
+
+  // Daily target = total remaining bills / days left
   const dailyTarget = totalBills > 0 ? totalBills / daysLeft : 0;
 
   // ── INCOME AGGREGATION ───────────────────────────────────────
@@ -176,17 +182,13 @@ export default function App() {
       let fires = false;
       if (b.freq === "weekly")  fires = dt.getDay() === parseInt(b.dow || 4);
       else if (b.freq === "monthly") fires = dt.getDate() === parseInt(b.day || 1);
-      else if (b.freq === "daily")   fires = true; // every day
+      // daily bills (food/smokes/fuel) are NOT tracked as payments
+      // they are entered as expenses via + Расход button
+      else if (b.freq === "daily")   fires = false;
       if (fires) upcoming.push({ ...b, daysAway: off, dt, amt: parseFloat(b.amount) });
     });
   }
-  // For daily bills — only show today (not every single day)
-  const upcomingFiltered = upcoming.filter((b, i) => {
-    if (b.freq !== "daily") return true;
-    // only show daily bill once (today or first occurrence)
-    return upcoming.findIndex(x => x.id === b.id) === i && b.daysAway === 0;
-  });
-  const nextBill = upcomingFiltered[0] || upcoming[0] || null;
+  const nextBill = upcoming[0] || null;
 
   // ── MUTATIONS ────────────────────────────────────────────────
   function saveLog(newLog) {
@@ -606,7 +608,10 @@ export default function App() {
       {/* ════════════ PAYMENTS ════════════ */}
       {tab === "payments" && (
         <div style={S.page}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#94a3b8", marginBottom: 12 }}>💳 Платежи</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#94a3b8", marginBottom: 6 }}>💳 Платежи</div>
+          <div style={{ fontSize: 9, color: "#334155", fontFamily: "'JetBrains Mono'", marginBottom: 12, lineHeight: 1.7 }}>
+            Только фиксированные платежи. Еда, сигареты, топливо — вноси через ＋ Расход.
+          </div>
 
           {/* Summary */}
           <div style={{ ...S.card, marginBottom: 10 }}>
@@ -624,7 +629,7 @@ export default function App() {
           </div>
 
           {/* All bills with coverage */}
-          {bills.filter(b => parseFloat(b.amount) > 0).map(b => {
+          {bills.filter(b => parseFloat(b.amount) > 0 && b.freq !== "daily").map(b => {
             const cost = billCost(b, CY, CM);
             const covPct = cost > 0 ? Math.min(Math.round((received / cost) * 100), 100) : 0;
             const nb = upcoming.find(u => u.id === b.id);
@@ -728,9 +733,11 @@ export default function App() {
             <button style={S.addBtn} onClick={addBill}>＋ Добавить</button>
           </div>
           <div style={S.infoBox}>
-            Аренда скутера → «Еженед.» → «Чт»{"\n"}
-            Аренда квартиры → «В мес.» → число «1»{"\n"}
-            Еда/Сигареты/Топливо → «Ежедн.» → сумма за 1 день
+            📌 Здесь только ФИКСИРОВАННЫЕ платежи{"\n"}
+            🏠 Аренда → «В мес.» → число «1»{"\n"}
+            🛵 Скутер → «Еженед.» → день «Чт»{"\n"}
+            ⚠️ Еда, сигареты, топливо — НЕ сюда.{"\n"}
+            Вноси их каждый день через «＋ Расход».
           </div>
 
           {bills.map(b => (
@@ -774,8 +781,12 @@ export default function App() {
 
               {/* row 3: day picker */}
               {b.freq === "daily" ? (
-                <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono'", background: "#182030", borderRadius: 7, padding: "7px 10px" }}>
-                  Каждый день · {totalDays} дней · итого {fz((parseFloat(b.amount) || 0) * totalDays)} zł в {MRU[vMon]}
+                <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono'", background: "#182030", borderRadius: 7, padding: "7px 10px", lineHeight: 1.8 }}>
+                  {"Каждый день · "}{daysLeft}{" дней до конца месяца"}{"
+"}
+                  {"Итого к трате: "}{fz((parseFloat(b.amount) || 0) * daysLeft)}{" zł в "}{MRU[vMon]}{"
+"}
+                  <span style={{color:"#f97316"}}>⚠️ Вноси через ＋ Расход — не в платежах</span>
                 </div>
               ) : b.freq === "monthly" ? (
                 <div>

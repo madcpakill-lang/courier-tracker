@@ -96,7 +96,10 @@ export default function App() {
 
   // ── aggregations ─────────────────────────────────────────────────
   const totalBills = bills.reduce((s, b) => s + billMonthlyCost(b, year, month), 0);
-  const dailyTarget = totalBills > 0 ? totalBills / totalDays : 0;
+  // dailyTarget = totalBills / days remaining from today (not total days!)
+  // Example: 4000 zł / 12 days left in April = 333 zł/day
+  const daysRemaining = isCurrent ? Math.max(1, totalDays - CD + 1) : totalDays;
+  const dailyTarget = totalBills > 0 ? totalBills / daysRemaining : 0;
 
   // all income entries this month
   const allEntries = Object.values(log).flat();
@@ -117,7 +120,7 @@ export default function App() {
 
   const netMonth   = received - totalBills - monthExp;
   const remaining  = Math.max(0, totalBills - received);
-  const daysLeft   = isCurrent ? Math.max(1, totalDays - CD + 1) : 1;
+  const daysLeft   = daysRemaining;  // same as daysRemaining
   const needPerDay = remaining / daysLeft;
   const monthPct   = pct(received, totalBills);
 
@@ -128,7 +131,9 @@ export default function App() {
   const todayInc     = todayWolt + todayBolt;
   const todayExp     = todayEntries.filter(e => e.type === "expense").reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
   const todayNet     = todayInc - todayExp;
-  const todayPct     = pct(todayInc, dailyTarget);
+  const todayPct = dailyTarget > 0 
+    ? Math.round(((todayInc - dailyTarget) / dailyTarget) * 100) 
+    : todayInc > 0 ? 100 : -100;
 
   // T+1 arrived today = yesterday's income
   const yesterday = new Date(CY, CM, CD - 1);
@@ -217,7 +222,7 @@ export default function App() {
   function nextMonth() { if (month === 11) { setYear(y => y + 1); setMonth(0); } else setMonth(m => m + 1); }
 
   // ── colors ───────────────────────────────────────────────────────
-  const dayColor   = todayPct >= 100 ? "#22c55e" : todayPct >= 70 ? "#fbbf24" : "#f97316";
+  const dayColor   = todayPct >= 0 ? "#22c55e" : todayPct >= -30 ? "#fbbf24" : "#f97316";
   const monthColor = netMonth >= 0 ? "#22c55e" : "#f97316";
 
   // ── calendar grid ────────────────────────────────────────────────
@@ -262,12 +267,14 @@ export default function App() {
           <div style={{ ...R.card, borderColor: dayColor + "55", marginBottom: 10 }}>
             <div style={R.micro}>P&L СЕГОДНЯ · {HH}:{MM}</div>
             <div style={{ ...R.pnlBig, color: dayColor }}>
-              {todayPct === 0 ? "0%" : todayPct >= 100 ? `+${todayPct - 100}%` : `−${100 - todayPct}%`}
+              {todayPct >= 0 ? `+${todayPct}%` : `${todayPct}%`}
             </div>
             <div style={{ fontSize: 10, color: dayColor, fontFamily: "'JetBrains Mono'", marginBottom: 12 }}>
-              {todayPct >= 100 ? `+${fz(todayInc - dailyTarget)} zł сверх цели` :
-               todayPct > 0 ? `ещё ${fz(dailyTarget - todayInc)} zł до цели` :
-               `цель ${fz(dailyTarget)} zł`}
+              {todayPct >= 0
+                ? `+${fz(todayInc - dailyTarget)} zł сверх цели 🔥`
+                : todayInc > 0
+                  ? `ещё ${fz(dailyTarget - todayInc)} zł до нуля`
+                  : `цель дня ${fz(dailyTarget)} zł`}
             </div>
 
             {/* stats row */}
@@ -282,9 +289,9 @@ export default function App() {
             </div>
 
             {/* bar */}
-            <div style={R.barTrack}><div style={{ ...R.barFill, width: `${Math.min(todayPct,100)}%`, background: dayColor }} /></div>
+            <div style={R.barTrack}><div style={{ ...R.barFill, width: `${Math.min(Math.max((todayPct + 100) / 2, 0), 100)}%`, background: dayColor }} /></div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#334155", fontFamily: "'JetBrains Mono'", marginTop: 4 }}>
-              <span>0</span><span>цель {fz(dailyTarget)} zł</span>
+              <span>−100%</span><span style={{color:"#475569"}}>0% = цель {fz(dailyTarget)} zł</span><span style={{color:"#22c55e"}}>+%</span>
             </div>
           </div>
 
@@ -304,6 +311,30 @@ export default function App() {
             </div>
             <div style={R.barTrack}><div style={{ ...R.barFill, width: `${Math.min(pct(monthInc,totalBills),100)}%`, background: pct(monthInc,totalBills) >= 100 ? "linear-gradient(90deg,#16a34a,#22c55e)" : pct(monthInc,totalBills) >= 60 ? "linear-gradient(90deg,#d97706,#fbbf24)" : "linear-gradient(90deg,#be123c,#f43f5e)" }} /></div>
           </div>
+
+          {/* smart advice */}
+          {(()=>{
+            let emoji="🛵", text=`Цель дня ${fz(dailyTarget)} zł — начни смену`, color="#475569";
+            if(nextBill && nextBill.daysAway===0 && received<parseFloat(nextBill.amount||0)){
+              emoji="🚨"; color="#ef4444"; text=`Сегодня платёж ${nextBill.label} — нужно ${fz(parseFloat(nextBill.amount)-received)} zł`;
+            } else if(nextBill && nextBill.daysAway<=3 && received<parseFloat(nextBill.amount||0)){
+              emoji="⚡"; color="#f97316"; text=`Через ${nextBill.daysAway} дн платёж ${fz(parseFloat(nextBill.amount))} zł — поднажми`;
+            } else if(todayPct>=50){
+              emoji="🔥"; color="#22c55e"; text=`P&L +${todayPct}% — отличный день!`;
+            } else if(todayPct>=0){
+              emoji="✅"; color="#22c55e"; text="Вышел в ноль! Теперь каждый заказ — чистая прибыль";
+            } else if(todayPct>=-30){
+              emoji="💪"; color="#fbbf24"; text=`Почти ноль — ещё ${fz(Math.max(0,dailyTarget-todayInc))} zł`;
+            } else if(todayInc>0){
+              emoji="🎯"; color="#f97316"; text=`P&L ${todayPct}% — продолжай, ты в пути`;
+            }
+            return (
+              <div style={{background:"#0b0f1b",border:"1px solid "+color+"44",borderRadius:12,padding:"11px 13px",marginBottom:10,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:20}}>{emoji}</span>
+                <span style={{fontSize:11,fontWeight:700,color,lineHeight:1.4,flex:1}}>{text}</span>
+              </div>
+            );
+          })()}
 
           {/* next payment */}
           {nextBill && (
@@ -708,8 +739,15 @@ export default function App() {
                 <div>
                   <div style={R.label}>Число месяца когда списывается</div>
                   <input style={{ ...R.inp, width: 100 }} type="text" inputMode="numeric" pattern="[0-9]*"
-                    placeholder="1" value={String(b.day || 1)}
-                    onChange={e => updateBill(b.id, "day", parseInt(e.target.value) || 1)} />
+                    placeholder="1-31" value={b.day === undefined ? "" : String(b.day)}
+                    onChange={e => {
+                      const raw = e.target.value.replace(/[^0-9]/g, "");
+                      updateBill(b.id, "day", raw);
+                    }}
+                    onBlur={e => {
+                      const n = parseInt(e.target.value);
+                      updateBill(b.id, "day", (!n || n < 1) ? 1 : n > 31 ? 31 : n);
+                    }} />
                 </div>
               ) : (
                 <div>

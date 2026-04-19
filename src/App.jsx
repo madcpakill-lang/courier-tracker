@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 
 // ── utils ────────────────────────────────────────────────────────
 const fz = n => Number(n || 0).toFixed(2);
-const pct = (a, b) => b > 0 ? Math.min(Math.round((a / b) * 100), 100) : 0;
+const pct = (a, b) => b > 0 ? Math.round((a / b) * 100) : 0;
 const dim = (y, m) => new Date(y, m + 1, 0).getDate();
 const p2 = n => String(n).padStart(2, "0");
 const dateStr = (y, m, d) => `${y}-${p2(m + 1)}-${p2(d)}`;
@@ -26,9 +26,9 @@ const DEFAULT_BILLS = [
   { id: "rent",    label: "Аренда квартиры", icon: "🏠", freq: "monthly", day: 1,  dow: 4, amount: "" },
   { id: "scooter", label: "Аренда скутера",  icon: "🛵", freq: "weekly",  day: 1,  dow: 4, amount: "" },
   { id: "phone",   label: "Телефон",         icon: "📱", freq: "monthly", day: 15, dow: 4, amount: "" },
-  { id: "food",    label: "Еда",             icon: "🍲", freq: "monthly", day: 1,  dow: 4, amount: "" },
-  { id: "smokes",  label: "Сигареты",        icon: "🚬", freq: "monthly", day: 1,  dow: 4, amount: "" },
-  { id: "fuel",    label: "Топливо",         icon: "⛽", freq: "monthly", day: 1,  dow: 4, amount: "" },
+  { id: "food",    label: "Еда",             icon: "🍲", freq: "daily",   day: 1,  dow: 4, amount: "" },
+  { id: "smokes",  label: "Сигареты",        icon: "🚬", freq: "daily",   day: 1,  dow: 4, amount: "" },
+  { id: "fuel",    label: "Топливо",         icon: "⛽", freq: "daily",   day: 1,  dow: 4, amount: "" },
 ];
 
 // how many times weekly bill fires in a month
@@ -282,7 +282,7 @@ export default function App() {
             </div>
 
             {/* bar */}
-            <div style={R.barTrack}><div style={{ ...R.barFill, width: `${todayPct}%`, background: dayColor }} /></div>
+            <div style={R.barTrack}><div style={{ ...R.barFill, width: `${Math.min(todayPct,100)}%`, background: dayColor }} /></div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#334155", fontFamily: "'JetBrains Mono'", marginTop: 4 }}>
               <span>0</span><span>цель {fz(dailyTarget)} zł</span>
             </div>
@@ -293,15 +293,16 @@ export default function App() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <div>
                 <div style={R.micro}>МЕСЯЦ · {MRU[CM]}</div>
-                <div style={{ fontSize: 22, fontWeight: 900, color: monthColor, letterSpacing: "-1px" }}>{monthPct}%</div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: pct(monthInc,totalBills)>=100?"#22c55e":pct(monthInc,totalBills)>=60?"#fbbf24":"#f97316", letterSpacing: "-1px" }}>{pct(monthInc,totalBills)}%</div>
+                <div style={{ fontSize: 8, color: "#253347", fontFamily: "'JetBrains Mono'", marginTop: 2 }}>⏳ +{fz(todayInc)} zł придёт завтра</div>
               </div>
               <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 14, fontWeight: 900, color: monthColor, fontFamily: "'JetBrains Mono'" }}>{netMonth >= 0 ? "+" : ""}{fz(netMonth)} zł</div>
+                <div style={{ fontSize: 14, fontWeight: 900, color: (monthInc-totalBills-monthExp)>=0?"#22c55e":"#f97316", fontFamily: "'JetBrains Mono'" }}>{(monthInc-totalBills-monthExp)>=0?"+":""}{fz(monthInc-totalBills-monthExp)} zł</div>
                 <div style={{ fontSize: 9, color: "#334155", fontFamily: "'JetBrains Mono'" }}>нетто месяца</div>
                 <div style={{ fontSize: 9, color: "#fbbf24", fontFamily: "'JetBrains Mono'", marginTop: 2 }}>нужно {fz(needPerDay)} zł/день</div>
               </div>
             </div>
-            <div style={R.barTrack}><div style={{ ...R.barFill, width: `${monthPct}%`, background: monthPct >= 100 ? "linear-gradient(90deg,#16a34a,#22c55e)" : monthPct >= 60 ? "linear-gradient(90deg,#d97706,#fbbf24)" : "linear-gradient(90deg,#be123c,#f43f5e)" }} /></div>
+            <div style={R.barTrack}><div style={{ ...R.barFill, width: `${Math.min(pct(monthInc,totalBills),100)}%`, background: pct(monthInc,totalBills) >= 100 ? "linear-gradient(90deg,#16a34a,#22c55e)" : pct(monthInc,totalBills) >= 60 ? "linear-gradient(90deg,#d97706,#fbbf24)" : "linear-gradient(90deg,#be123c,#f43f5e)" }} /></div>
           </div>
 
           {/* next payment */}
@@ -379,13 +380,13 @@ export default function App() {
               <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
                 <div style={{ flex: 1 }}>
                   <div style={R.label}>🔵 Wolt (zł)</div>
-                  <input style={R.inp} type="number" min="0" placeholder="0.00"
+                  <input style={R.inp} type="text" inputMode="decimal" pattern="[0-9.]*" placeholder="0.00"
                     inputMode="decimal" value={incWolt}
                     onChange={e => setIncWolt(e.target.value)} autoFocus />
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={R.label}>🟢 Bolt (zł)</div>
-                  <input style={R.inp} type="number" min="0" placeholder="0.00"
+                  <input style={R.inp} type="text" inputMode="decimal" pattern="[0-9.]*" placeholder="0.00"
                     inputMode="decimal" value={incBolt}
                     onChange={e => setIncBolt(e.target.value)} />
                 </div>
@@ -427,7 +428,7 @@ export default function App() {
                 placeholder="Что именно…" value={expLabel}
                 onChange={e => setExpLabel(e.target.value)} />
               <div style={R.label}>Сумма (zł)</div>
-              <input style={{ ...R.inp, marginBottom: 12 }} type="number" min="0"
+              <input style={{ ...R.inp, marginBottom: 12 }} type="text" inputMode="decimal" pattern="[0-9.]*"
                 placeholder="0.00" inputMode="decimal" value={expAmt}
                 onChange={e => setExpAmt(e.target.value)} />
               <button style={{ ...R.fab, background: "linear-gradient(135deg,#b45309,#d97706)" }}
@@ -459,7 +460,7 @@ export default function App() {
               const net = inc - exp;
               const isToday = isCurrent && d === CD;
               const isFuture = isCurrent && d > CD;
-              const dp = pct(inc, dailyTarget);
+              const dp = dailyTarget > 0 ? Math.round((inc / dailyTarget) * 100) : 0;
               return (
                 <div key={d}
                   style={{ ...R.calCell, ...(isToday ? R.calToday : {}), ...(isFuture ? { opacity: 0.35 } : {}), ...(inc > 0 ? { borderColor: net >= 0 ? "#16a34a55" : "#ef444433" } : {}) }}
@@ -482,7 +483,7 @@ export default function App() {
             const inc = entries.filter(e => e.type === "income").reduce((s, e) => s + (parseFloat(e.wolt) || 0) + (parseFloat(e.bolt) || 0), 0);
             const exp = entries.filter(e => e.type === "expense").reduce((s, e) => s + (parseFloat(e.amount) || 0), 0);
             const d = parseInt(dk.split("-")[2]);
-            const dp = pct(inc, dailyTarget);
+            const dp = dailyTarget > 0 ? Math.round((inc / dailyTarget) * 100) : 0;
             if (!inc && !exp) return null;
             return (
               <div key={dk} style={R.dayRow} onClick={() => setDayModal(dk)}>
@@ -582,7 +583,7 @@ export default function App() {
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 700 }}>{b.icon} {b.label}</div>
                   <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono'" }}>
-                    {b.freq === "weekly" ? `Каждый ${DOW[b.dow]} · ${weeklyCount(b.dow, CY, CM)}× в месяц` : `${b.day}-го числа`}
+                    {b.freq === "weekly" ? `Каждый ${DOW[b.dow]} · ${weeklyCount(b.dow, CY, CM)}× в месяц` : b.freq === "daily" ? `Каждый день · ${dim(CY, CM)}× в месяц` : `${b.day}-го числа`}
                   </div>
                 </div>
                 <div style={{ textAlign: "right" }}>
@@ -618,12 +619,12 @@ export default function App() {
                 <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
                   <div style={{ flex: 1 }}>
                     <div style={R.label}>Нужно (zł)</div>
-                    <input style={R.inp} type="number" min="0" placeholder="0" inputMode="decimal"
+                    <input style={R.inp} type="text" inputMode="decimal" pattern="[0-9.]*" placeholder="0" inputMode="decimal"
                       value={g.target} onChange={e => updateGoal(g.id, "target", e.target.value)} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={R.label}>Накоплено (zł)</div>
-                    <input style={R.inp} type="number" min="0" placeholder="0" inputMode="decimal"
+                    <input style={R.inp} type="text" inputMode="decimal" pattern="[0-9.]*" placeholder="0" inputMode="decimal"
                       value={g.saved} onChange={e => updateGoal(g.id, "saved", e.target.value)} />
                   </div>
                   <div style={{ flex: 1 }}>
@@ -677,16 +678,16 @@ export default function App() {
               <div style={{ display: "flex", gap: 8 }}>
                 <div style={{ flex: 1 }}>
                   <div style={R.label}>Сумма (zł)</div>
-                  <input style={{ ...R.inp, fontSize: 15, fontWeight: 700 }} type="number" min="0"
-                    placeholder="0" inputMode="decimal" value={b.amount}
-                    onChange={e => updateBill(b.id, "amount", e.target.value)} />
+                  <input style={{ ...R.inp, fontSize: 15, fontWeight: 700 }} type="text" inputMode="decimal" pattern="[0-9.]*"
+                    placeholder="0.00" value={b.amount}
+                    onChange={e => { const v = e.target.value.replace(/[^0-9.]/g,""); updateBill(b.id, "amount", v); }} />
                 </div>
                 <div style={{ flex: 1 }}>
                   <div style={R.label}>Частота</div>
                   <div style={{ display: "flex", gap: 4 }}>
-                    {[["monthly", "В месяц"], ["weekly", "Еженед."]].map(([fr, lbl]) => (
+                    {[["monthly", "В мес."], ["weekly", "Еженед."], ["daily", "Ежедн."]].map(([fr, lbl]) => (
                       <button key={fr} onClick={() => updateBill(b.id, "freq", fr)}
-                        style={{ flex: 1, padding: "9px 4px", borderRadius: 7, border: "1px solid", fontSize: 9, cursor: "pointer",
+                        style={{ flex: 1, padding: "9px 2px", borderRadius: 7, border: "1px solid", fontSize: 8, cursor: "pointer",
                           fontFamily: "'Unbounded',sans-serif", fontWeight: 700,
                           background: b.freq === fr ? "#1e3a5f" : "#0b0f1b",
                           borderColor: b.freq === fr ? "#3b82f6" : "#253347",
@@ -699,11 +700,15 @@ export default function App() {
               </div>
 
               {/* day picker */}
-              {b.freq === "monthly" ? (
+              {b.freq === "daily" ? (
+                <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono'", padding: "6px 10px", background: "#182030", borderRadius: 7 }}>
+                  Каждый день · {dim(year, month)} дней · итого {fz((parseFloat(b.amount)||0)*dim(year,month))} zł в {MRU[month]}
+                </div>
+              ) : b.freq === "monthly" ? (
                 <div>
                   <div style={R.label}>Число месяца когда списывается</div>
-                  <input style={{ ...R.inp, width: 100 }} type="number" min="1" max="31"
-                    placeholder="1" value={b.day || 1}
+                  <input style={{ ...R.inp, width: 100 }} type="text" inputMode="numeric" pattern="[0-9]*"
+                    placeholder="1" value={String(b.day || 1)}
                     onChange={e => updateBill(b.id, "day", parseInt(e.target.value) || 1)} />
                 </div>
               ) : (
@@ -821,7 +826,7 @@ const R = {
   fab: { padding: 14, borderRadius: 12, border: "none", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "'Unbounded',sans-serif" },
   panel: { position: "fixed", bottom: 0, left: "50%", transform: "translateX(-50%)", width: "100%", maxWidth: 480, background: "#0d1221", borderTop: "1px solid #253347", padding: "16px 14px 28px", zIndex: 100 },
   closeBtn: { background: "none", border: "none", color: "#475569", fontSize: 18, cursor: "pointer" },
-  inp: { width: "100%", background: "#182030", border: "1px solid #253347", borderRadius: 8, padding: "10px 11px", color: "#e2e8f0", fontSize: 14, fontFamily: "'JetBrains Mono'", outline: "none" },
+  inp: { width: "100%", background: "#182030", border: "1px solid #253347", borderRadius: 8, padding: "10px 11px", color: "#e2e8f0", fontSize: 14, fontFamily: "'JetBrains Mono'", outline: "none", WebkitAppearance: "none", appearance: "none" },
   label: { fontSize: 8, color: "#475569", fontFamily: "'JetBrains Mono'", marginBottom: 5, marginTop: 2 },
   infoBox: { fontSize: 9, color: "#253347", fontFamily: "'JetBrains Mono'", background: "#0b0f1b", border: "1px solid #182030", borderRadius: 8, padding: "9px 11px", marginBottom: 12, lineHeight: 1.8 },
   addBtn: { background: "linear-gradient(135deg,#1d4ed8,#2563eb)", border: "none", color: "#fff", fontSize: 10, fontWeight: 700, padding: "8px 14px", borderRadius: 9, cursor: "pointer", fontFamily: "'Unbounded',sans-serif" },

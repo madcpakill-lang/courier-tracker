@@ -732,12 +732,12 @@ export default function App() {
             <div style={{ fontSize: 14, fontWeight: 700, color: "#94a3b8" }}>⚙️ Платежи</div>
             <button style={S.addBtn} onClick={addBill}>＋ Добавить</button>
           </div>
-          <div style={S.infoBox}>
-            📌 Здесь только ФИКСИРОВАННЫЕ платежи{"\n"}
-            🏠 Аренда → «В мес.» → число «1»{"\n"}
-            🛵 Скутер → «Еженед.» → день «Чт»{"\n"}
-            ⚠️ Еда, сигареты, топливо — НЕ сюда.{"\n"}
-            Вноси их каждый день через «＋ Расход».
+                    <div style={S.infoBox}>
+            <div>📌 Здесь только ФИКСИРОВАННЫЕ платежи</div>
+            <div>🏠 Аренда → «В мес.» → число «1»</div>
+            <div>🛵 Скутер → «Еженед.» → день «Чт»</div>
+            <div style={{color:"#f97316"}}>⚠️ Еда/сигареты/топливо — НЕ сюда</div>
+            <div>Вноси их каждый день через «＋ Расход»</div>
           </div>
 
           {bills.map(b => (
@@ -782,12 +782,9 @@ export default function App() {
               {/* row 3: day picker */}
               {b.freq === "daily" ? (
                 <div style={{ fontSize: 9, color: "#475569", fontFamily: "'JetBrains Mono'", background: "#182030", borderRadius: 7, padding: "7px 10px", lineHeight: 1.8 }}>
-                  {"Каждый день · "}{daysLeft}{" дней до конца месяца"}{"
-"}
-                  {"Итого к трате: "}{fz((parseFloat(b.amount) || 0) * daysLeft)}{" zł в "}{MRU[vMon]}{"
-"}
-                  <span style={{color:"#f97316"}}>⚠️ Вноси через ＋ Расход — не в платежах</span>
-                </div>
+                  <div>{"Каждый день · "}{daysLeft}{" дней до конца месяца"}</div>
+                  <div>{"Итого к трате: "}{fz((parseFloat(b.amount) || 0) * daysLeft)}{" zł в "}{MRU[vMon]}</div>
+                  <div style={{color:"#f97316"}}>{"⚠️ Вноси через ＋ Расход — не в платежах"}</div>
               ) : b.freq === "monthly" ? (
                 <div>
                   <div style={S.lbl}>Число месяца когда списывается</div>

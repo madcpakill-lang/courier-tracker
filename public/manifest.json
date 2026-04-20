@@ -1,8 +1,8 @@
 {
-  "short_name": "КурьерP&L",
-  "name": "КурьерP&L — Финансовый мозг",
-  "start_url": ".",
-  "display": "standalone",
-  "theme_color": "#060911",
-  "background_color": "#060911"
+  "short_name":"КурьерP&L",
+  "name":"КурьерP&L — Финансовый мозг",
+  "start_url":".",
+  "display":"standalone",
+  "theme_color":"#060911",
+  "background_color":"#060911"
 }
